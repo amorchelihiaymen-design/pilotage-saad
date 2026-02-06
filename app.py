@@ -18,7 +18,7 @@ def hhmm_to_decimal(val):
     except: return 0.0
 
 def decimal_to_hhmm(dec):
-    """Convertit un nombre (12.5) en texte propre (12:30) avec gestion du signe"""
+    """Convertit un nombre (12.5) en texte propre (12:30)"""
     if pd.isna(dec) or abs(dec) < 0.001: return "00:00"
     abs_dec = abs(dec)
     h = int(abs_dec)
@@ -31,8 +31,8 @@ def decimal_to_hhmm(dec):
 st.title("🚀 Pilotage Expert : Modulation & Conformité Légale")
 st.markdown("---")
 
-# --- FILTRES LATÉRAUX (CELLULES) ---
-st.sidebar.header("Gestion des Cellules")
+# --- BARRE LATÉRALE : FILTRES ET TRIS ---
+st.sidebar.header("1. Gestion des Cellules")
 secteurs_map = {
     "Toutes": "Toutes les cellules",
     "11": "Secteur 1 (011)",
@@ -41,6 +41,19 @@ secteurs_map = {
 }
 choix_code = st.sidebar.selectbox("Sélectionner la Cellule", options=list(secteurs_map.keys()), format_func=lambda x: secteurs_map[x])
 
+st.sidebar.markdown("---")
+st.sidebar.header("2. Options de Tri Mensuel")
+tri_col_m = st.sidebar.selectbox("Trier le Mensuel par :", 
+                               options=['Déviation à date', 'Déviation mensuelle', 'Potentiel heures', 'Nom'])
+tri_ordre_m = st.sidebar.radio("Ordre Mensuel :", ["Décroissant", "Croissant"], key="tri_m")
+
+st.sidebar.markdown("---")
+st.sidebar.header("3. Options de Tri Hebdo")
+tri_col_h = st.sidebar.selectbox("Trier l'Hebdo par :", 
+                               options=['Heures totales', 'Heures contrat', 'Date', 'Intervenant'])
+tri_ordre_h = st.sidebar.radio("Ordre Hebdo :", ["Décroissant", "Croissant"], key="tri_h")
+
+# --- CHARGEMENT DES FICHIERS ---
 col_f1, col_f2 = st.columns(2)
 with col_f1:
     files_hebdo = st.file_uploader("📂 Exports HEBDOMADAIRES", type="csv", accept_multiple_files=True)
@@ -48,15 +61,13 @@ with col_f2:
     file_mensuel = st.file_uploader("📂 Export MENSUEL", type="csv")
 
 if files_hebdo and file_mensuel:
-    # 1. Traitement Mensuel
+    # --- TRAITEMENT MENSUEL ---
     df_m = pd.read_csv(file_mensuel, sep=";", encoding="latin1")
     df_m = df_m[df_m['Nom'].notna() & ~df_m['Nom'].astype(str).str.contains('Somme', case=False, na=False)]
     
-    # Correction automatique des colonnes V2
     if 'Déviation cumulée' in df_m.columns:
         df_m = df_m.rename(columns={'Déviation cumulée': 'Déviation à date'})
     
-    # Identification de la colonne Secteur (Code.1 ou Code)
     col_secteur = 'Code'
     for c in df_m.columns:
         if 'Code' in c:
@@ -67,19 +78,19 @@ if files_hebdo and file_mensuel:
 
     mapping_cellule = df_m.set_index('Nom')[col_secteur].astype(str).to_dict()
 
-    # 2. Traitement Hebdo
+    # --- TRAITEMENT HEBDO ---
     list_dfs = [pd.read_csv(f, sep=";", encoding="latin1") for f in files_hebdo]
     df_h = pd.concat(list_dfs)
     df_h = df_h[df_h['Intervenant'].notna() & ~df_h['Intervenant'].astype(str).str.contains('Somme', case=False, na=False)]
     df_h['Code_Cellule'] = df_h['Intervenant'].map(mapping_cellule)
     df_h['Début_dt'] = pd.to_datetime(df_h['Début'], dayfirst=True)
 
-    # --- APPLICATION DU FILTRE ---
+    # --- APPLICATION DU FILTRE CELLULE ---
     if choix_code != "Toutes":
         df_m = df_m[df_m[col_secteur].astype(str).str.contains(choix_code, na=False)].copy()
         df_h = df_h[df_h['Code_Cellule'].astype(str).str.contains(choix_code, na=False)].copy()
 
-    # --- CALCULS NUMÉRIQUES (POUR LE TRI) ---
+    # --- CALCULS NUMÉRIQUES ---
     for col in ['Déviation mensuelle', 'Déviation à date', 'Potentiel heures']:
         df_m[col + '_num'] = df_m[col].apply(hhmm_to_decimal)
 
@@ -100,8 +111,10 @@ if files_hebdo and file_mensuel:
 
     df_h['Statut'] = df_h.apply(check_alerte, axis=1)
     
-    # Tri numérique Hebdo (Date puis Gravité)
-    df_h = df_h.sort_values(by=['Début_dt', 'Total_num'], ascending=[False, False])
+    # TRI NUMÉRIQUE HEBDO
+    map_tri_h = {'Intervenant': 'Intervenant', 'Date': 'Début_dt', 
+                 'Heures totales': 'Total_num', 'Heures contrat': 'Contrat_num'}
+    df_h = df_h.sort_values(by=map_tri_h[tri_col_h], ascending=(tri_ordre_h == "Croissant"))
     
     df_h_disp = df_h[df_h['Statut'] != "OK"].copy()
     df_h_disp['Heures'] = df_h_disp['Total_num'].apply(decimal_to_hhmm)
@@ -122,21 +135,22 @@ if files_hebdo and file_mensuel:
     if 'notes' not in st.session_state: st.session_state.notes = {}
     df_m['Justification'] = df_m['Nom'].map(st.session_state.notes).fillna("")
     
-    # Tri numérique par défaut sur la déviation cumulée
-    df_m = df_m.sort_values(by='Déviation à date_num', ascending=False)
-    
+    # TRI NUMÉRIQUE MENSUEL
+    map_tri_m = {'Nom': 'Nom', 'Déviation à date': 'Déviation à date_num', 
+                 'Déviation mensuelle': 'Déviation mensuelle_num', 'Potentiel heures': 'Potentiel heures_num'}
+    df_m = df_m.sort_values(by=map_tri_m[tri_col_m], ascending=(tri_ordre_m == "Croissant"))
+
     show_all = st.toggle("Afficher toute la cellule", value=False)
     mask_ecart = (df_m['Déviation mensuelle_num'] > 5) | (df_m['Déviation mensuelle_num'] < -5)
     df_display = df_m if show_all else df_m[mask_ecart]
 
-    # Formatage texte pour l'affichage mais conservation des numériques
+    # Formatage HH:MM
     df_edit = df_display.copy()
     df_edit['Déviation mensuelle'] = df_edit['Déviation mensuelle_num'].apply(decimal_to_hhmm)
     df_edit['Déviation à date'] = df_edit['Déviation à date_num'].apply(decimal_to_hhmm)
     df_edit['Potentiel'] = df_edit['Potentiel heures_num'].apply(decimal_to_hhmm)
 
-    st.info("💡 Modifiez la 'Déviation à date' ou ajoutez une 'Justification' (les compteurs en bas s'ajustent).")
-    
+    st.info("💡 Modifiez la 'Déviation à date' ou ajoutez un commentaire.")
     edited_df = st.data_editor(
         df_edit[['Nom', 'Déviation mensuelle', 'Déviation à date', 'Potentiel', 'Justification']],
         column_config={
@@ -146,34 +160,24 @@ if files_hebdo and file_mensuel:
         use_container_width=True, hide_index=True, key="mod_editor"
     )
 
-    # --- MISE À JOUR DYNAMIQUE DES COMPTEURS ---
-    df_final = df_m.copy()
+    # --- MISE À JOUR DYNAMIQUE ---
     for _, row in edited_df.iterrows():
-        new_val = hhmm_to_decimal(row['Déviation à date'])
-        df_final.loc[df_final['Nom'] == row['Nom'], 'Déviation à date_num'] = new_val
+        new_dec = hhmm_to_decimal(row['Déviation à date'])
+        df_m.loc[df_m['Nom'] == row['Nom'], 'Déviation à date_num'] = new_dec
         st.session_state.notes[row['Nom']] = row['Justification']
 
-    # Bilan Global de la Cellule
+    # Bilan Global
     st.markdown("---")
-    st.subheader(f"📊 Bilan Global : {secteurs_map[choix_code]}")
+    st.subheader(f"📊 Bilan Global de la Cellule : {secteurs_map[choix_code]}")
     
-    # On permet d'ignorer les lignes avec une justification si besoin
-    exclure_justifiees = st.checkbox("Exclure les salariés justifiés du bilan global", value=False)
-    if exclure_justifiees:
-        df_bilan = df_final[df_final['Nom'].map(st.session_state.notes) == ""]
-    else:
-        df_bilan = df_final
-
-    pos = df_bilan[df_bilan['Déviation à date_num'] > 0]['Déviation à date_num'].sum()
-    neg = df_bilan[df_bilan['Déviation à date_num'] < 0]['Déviation à date_num'].sum()
+    pos = df_m[df_m['Déviation à date_num'] > 0]['Déviation à date_num'].sum()
+    neg = df_m[df_m['Déviation à date_num'] < 0]['Déviation à date_num'].sum()
     solde = pos + neg
     
     m1, m2, m3 = st.columns(3)
     m1.metric("Cumul Positif (+)", decimal_to_hhmm(pos))
     m2.metric("Cumul Négatif (-)", decimal_to_hhmm(neg))
-    m3.metric("Solde Cellule", decimal_to_hhmm(solde), 
-              delta="Déficit" if solde < 0 else "Surplus", 
-              delta_color="inverse" if solde < 0 else "normal")
+    m3.metric("Solde Cellule", decimal_to_hhmm(solde), delta="Déficit" if solde < 0 else "Surplus", delta_color="inverse" if solde < 0 else "normal")
 
 else:
-    st.info("👋 Bonjour ! Importez vos fichiers pour activer le pilotage par cellule.")
+    st.info("👋 Bonjour ! Importez vos fichiers pour piloter vos cellules.")
