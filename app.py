@@ -37,7 +37,6 @@ secteurs_map = {
     "12": "Secteur 2 (012)",
     "13": "Secteur 3 (013)"
 }
-# On utilise la fin du code (11, 12, 13) pour plus de fiabilité
 choix_code = st.sidebar.selectbox("Sélectionner la Cellule", options=list(secteurs_map.keys()), format_func=lambda x: secteurs_map[x])
 
 # --- CHARGEMENT ---
@@ -52,33 +51,29 @@ if files_hebdo and file_mensuel:
     df_m = pd.read_csv(file_mensuel, sep=";", encoding="latin1")
     df_m = df_m[df_m['Nom'].notna() & ~df_m['Nom'].astype(str).str.contains('Somme', case=False, na=False)]
     
-    # Sécurité : On identifie la colonne Code (parfois renommée Code.1 par pandas)
+    # Identification robuste de la colonne Code
     col_code = 'Code' if 'Code' in df_m.columns else df_m.columns[1]
 
-    # Création du dictionnaire de correspondance : Nom -> Code Secteur
+    # Lien pour le fichier Hebdo
     mapping_cellule = df_m.set_index('Nom')[col_code].astype(str).to_dict()
 
     # 2. Traitement Hebdo
     list_dfs = [pd.read_csv(f, sep=";", encoding="latin1") for f in files_hebdo]
     df_h = pd.concat(list_dfs)
     df_h = df_h[df_h['Intervenant'].notna() & ~df_h['Intervenant'].astype(str).str.contains('Somme', case=False, na=False)]
-    
-    # Injection du secteur dans le hebdo
     df_h['Code_Cellule'] = df_h['Intervenant'].map(mapping_cellule)
-    
-    # Tri par date
     df_h['Début_dt'] = pd.to_datetime(df_h['Début'], dayfirst=True)
     df_h = df_h.sort_values(by='Début_dt', ascending=False)
 
     # --- APPLICATION DU FILTRE ---
     if choix_code != "Toutes":
-        # On cherche si le code contient 11, 12 ou 13
-        df_m = df_m[df_m[col_code].astype(str).str.contains(choix_code, na=False)]
-        df_h = df_h[df_h['Code_Cellule'].astype(str).str.contains(choix_code, na=False)]
+        df_m = df_m[df_m[col_code].astype(str).str.contains(choix_code, na=False)].copy()
+        df_h = df_h[df_h['Code_Cellule'].astype(str).str.contains(choix_code, na=False)].copy()
 
     # --- CALCULS ---
-    for col in ['Déviation mensuelle', 'Déviation à date', 'Potentiel heures']:
-        df_m[col + '_dec'] = df_m[col].apply(hhmm_to_decimal)
+    # Conversion initiale en décimal
+    df_m['Déviation mensuelle_dec'] = df_m['Déviation mensuelle'].apply(hhmm_to_decimal)
+    df_m['Déviation à date_dec'] = df_m['Déviation à date'].apply(hhmm_to_decimal)
 
     df_h['Total_dec'] = df_h['Heures totales'].apply(hhmm_to_decimal)
     df_h['Contrat_dec'] = df_h['Heures hebdo contrat'].apply(hhmm_to_decimal)
@@ -96,7 +91,6 @@ if files_hebdo and file_mensuel:
             return "OK"
 
     df_h['Statut'] = df_h.apply(check_alerte, axis=1)
-    
     df_h_disp = df_h[df_h['Statut'] != "OK"].copy()
     df_h_disp['Heures'] = df_h_disp['Total_dec'].apply(decimal_to_hhmm)
     df_h_disp['Contrat'] = df_h_disp['Contrat_dec'].apply(decimal_to_hhmm)
@@ -116,32 +110,48 @@ if files_hebdo and file_mensuel:
     if 'notes' not in st.session_state: st.session_state.notes = {}
     df_m['Justification'] = df_m['Nom'].map(st.session_state.notes).fillna("")
     
-    # FILTRE RÉACTIF POUR LE MENSUEL (SEUIL +/- 5h)
     show_all = st.toggle("Afficher tous les salariés de la cellule", value=False)
-    if not show_all:
-        df_m_f = df_m[(df_m['Déviation mensuelle_dec'] > 5) | (df_m['Déviation mensuelle_dec'] < -5)]
-    else:
-        df_m_f = df_m
+    
+    # On définit les lignes à afficher (Filtre réactif visuel)
+    mask_ecart = (df_m['Déviation mensuelle_dec'] > 5) | (df_m['Déviation mensuelle_dec'] < -5)
+    df_display = df_m if show_all else df_m[mask_ecart]
 
+    # ÉDITEUR REACTIF
+    st.info("Vous pouvez modifier 'Déviation à date' pour ajuster le bilan ou ajouter une justification.")
     edited_df = st.data_editor(
-        df_m_f[['Nom', 'Déviation mensuelle', 'Déviation à date', 'Potentiel heures', 'Justification']],
-        column_config={"Justification": st.column_config.TextColumn("Commentaire / Justification", width="large")},
+        df_display[['Nom', 'Déviation mensuelle', 'Déviation à date', 'Potentiel heures', 'Justification']],
+        column_config={
+            "Déviation à date": st.column_config.TextColumn("Déviation à date (Modifiable HH:MM)"),
+            "Justification": st.column_config.TextColumn("Commentaire", width="large")
+        },
         use_container_width=True, hide_index=True, key="mod_editor"
     )
-    for i, row in edited_df.iterrows(): st.session_state.notes[row['Nom']] = row['Justification']
 
-    # --- BILAN CELLULE ---
+    # RE-CALCUL DES TOTAUX BASÉ SUR L'ÉDITEUR
+    # On met à jour les données globales avec les modifs de l'éditeur
+    df_updated = df_m.copy()
+    for _, row in edited_df.iterrows():
+        # Mise à jour de la déviation à date (conversion HH:MM -> Decimal)
+        new_val_dec = hhmm_to_decimal(row['Déviation à date'])
+        df_updated.loc[df_updated['Nom'] == row['Nom'], 'Déviation à date_dec'] = new_val_dec
+        # Sauvegarde des notes
+        st.session_state.notes[row['Nom']] = row['Justification']
+
+    # --- BILAN CELLULE RÉACTIF ---
     st.markdown("---")
-    pos = df_m[df_m['Déviation à date_dec'] > 0]['Déviation à date_dec'].sum()
-    neg = df_m[df_m['Déviation à date_dec'] < 0]['Déviation à date_dec'].sum()
+    st.subheader(f"📊 Bilan de la Cellule : {secteurs_map[choix_code]}")
+    
+    # Calculs sur les données mises à jour
+    pos = df_updated[df_updated['Déviation à date_dec'] > 0]['Déviation à date_dec'].sum()
+    neg = df_updated[df_updated['Déviation à date_dec'] < 0]['Déviation à date_dec'].sum()
     solde = pos + neg
     
     m1, m2, m3 = st.columns(3)
     m1.metric("Cumul Positif (+)", decimal_to_hhmm(pos))
     m2.metric("Cumul Négatif (-)", decimal_to_hhmm(neg))
-    m3.metric("Solde Cellule", decimal_to_hhmm(solde), 
-              delta="Déficit" if solde < 0 else "Surplus", 
+    m3.metric("Rapport Net (Solde Cellule)", decimal_to_hhmm(solde), 
+              delta="À combler" if solde < 0 else "Surplus", 
               delta_color="inverse" if solde < 0 else "normal")
 
 else:
-    st.info("👋 Bonjour ! Importez vos fichiers pour démarrer.")
+    st.info("👋 Bonjour ! Importez vos fichiers pour piloter vos cellules.")
