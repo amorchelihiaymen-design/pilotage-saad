@@ -87,4 +87,93 @@ if files_hebdo and file_mensuel:
     df_h['Contrat_num'] = df_h['Heures hebdo contrat'].apply(hhmm_to_decimal)
     df_h['Ecart_num'] = df_h['Total_num'] - df_h['Contrat_num']
 
-    # --- SECTION ALERTES HEBDO
+    # --- SECTION ALERTES HEBDO ---
+    st.header(f"⚠️ Dépassements Hebdo - {secteurs_map[choix_code]}")
+    
+    def check_alerte(row):
+        if row['Contrat_num'] >= 35:
+            return "🛑 TEMPS PLEIN > 40H" if row['Total_num'] > 40 else "OK"
+        else:
+            if row['Total_num'] > 34: return "🛑 TEMPS PARTIEL > 34H"
+            if row['Ecart_num'] > (row['Contrat_num'] / 3): return "🟠 DÉPASSEMENT 1/3"
+            return "OK"
+
+    df_h['Statut'] = df_h.apply(check_alerte, axis=1)
+    
+    # Tri numérique Hebdo (Date puis Gravité)
+    df_h = df_h.sort_values(by=['Début_dt', 'Total_num'], ascending=[False, False])
+    
+    df_h_disp = df_h[df_h['Statut'] != "OK"].copy()
+    df_h_disp['Heures'] = df_h_disp['Total_num'].apply(decimal_to_hhmm)
+    df_h_disp['Contrat'] = df_h_disp['Contrat_num'].apply(decimal_to_hhmm)
+    df_h_disp['Semaine du'] = df_h_disp['Début_dt'].dt.strftime('%d/%m/%Y')
+
+    if not df_h_disp.empty:
+        st.dataframe(df_h_disp[['Semaine du', 'Intervenant', 'Contrat', 'Heures', 'Statut']].style.apply(
+            lambda x: ['background-color: #ff4b4b' if '🛑' in str(v) else 'background-color: #ffa500' if '🟠' in str(v) else '' for v in x], subset=['Statut']
+        ), use_container_width=True, hide_index=True)
+    else:
+        st.success("Aucune alerte hebdomadaire.")
+
+    # --- SECTION MODULATION MENSUELLE ---
+    st.markdown("---")
+    st.header(f"🎯 Suivi Modulation - {secteurs_map[choix_code]}")
+    
+    if 'notes' not in st.session_state: st.session_state.notes = {}
+    df_m['Justification'] = df_m['Nom'].map(st.session_state.notes).fillna("")
+    
+    # Tri numérique par défaut sur la déviation cumulée
+    df_m = df_m.sort_values(by='Déviation à date_num', ascending=False)
+    
+    show_all = st.toggle("Afficher toute la cellule", value=False)
+    mask_ecart = (df_m['Déviation mensuelle_num'] > 5) | (df_m['Déviation mensuelle_num'] < -5)
+    df_display = df_m if show_all else df_m[mask_ecart]
+
+    # Formatage texte pour l'affichage mais conservation des numériques
+    df_edit = df_display.copy()
+    df_edit['Déviation mensuelle'] = df_edit['Déviation mensuelle_num'].apply(decimal_to_hhmm)
+    df_edit['Déviation à date'] = df_edit['Déviation à date_num'].apply(decimal_to_hhmm)
+    df_edit['Potentiel'] = df_edit['Potentiel heures_num'].apply(decimal_to_hhmm)
+
+    st.info("💡 Modifiez la 'Déviation à date' ou ajoutez une 'Justification' (les compteurs en bas s'ajustent).")
+    
+    edited_df = st.data_editor(
+        df_edit[['Nom', 'Déviation mensuelle', 'Déviation à date', 'Potentiel', 'Justification']],
+        column_config={
+            "Déviation à date": st.column_config.TextColumn("Déviation à date (HH:MM)"),
+            "Justification": st.column_config.TextColumn("Commentaire", width="large")
+        },
+        use_container_width=True, hide_index=True, key="mod_editor"
+    )
+
+    # --- MISE À JOUR DYNAMIQUE DES COMPTEURS ---
+    df_final = df_m.copy()
+    for _, row in edited_df.iterrows():
+        new_val = hhmm_to_decimal(row['Déviation à date'])
+        df_final.loc[df_final['Nom'] == row['Nom'], 'Déviation à date_num'] = new_val
+        st.session_state.notes[row['Nom']] = row['Justification']
+
+    # Bilan Global de la Cellule
+    st.markdown("---")
+    st.subheader(f"📊 Bilan Global : {secteurs_map[choix_code]}")
+    
+    # On permet d'ignorer les lignes avec une justification si besoin
+    exclure_justifiees = st.checkbox("Exclure les salariés justifiés du bilan global", value=False)
+    if exclure_justifiees:
+        df_bilan = df_final[df_final['Nom'].map(st.session_state.notes) == ""]
+    else:
+        df_bilan = df_final
+
+    pos = df_bilan[df_bilan['Déviation à date_num'] > 0]['Déviation à date_num'].sum()
+    neg = df_bilan[df_bilan['Déviation à date_num'] < 0]['Déviation à date_num'].sum()
+    solde = pos + neg
+    
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Cumul Positif (+)", decimal_to_hhmm(pos))
+    m2.metric("Cumul Négatif (-)", decimal_to_hhmm(neg))
+    m3.metric("Solde Cellule", decimal_to_hhmm(solde), 
+              delta="Déficit" if solde < 0 else "Surplus", 
+              delta_color="inverse" if solde < 0 else "normal")
+
+else:
+    st.info("👋 Bonjour ! Importez vos fichiers pour activer le pilotage par cellule.")
