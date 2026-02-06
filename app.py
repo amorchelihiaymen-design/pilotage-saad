@@ -7,6 +7,7 @@ st.set_page_config(page_title="Pilotage Cellules - Modulation & Conformité", la
 
 # --- FONCTIONS DE CONVERSION ---
 def hhmm_to_decimal(val):
+    """Convertit HH:MM ou '33,46' en float decimal"""
     if pd.isna(val) or val == "" or "Somme" in str(val): return 0.0
     try:
         val_str = str(val).strip()
@@ -17,6 +18,7 @@ def hhmm_to_decimal(val):
     except: return 0.0
 
 def decimal_to_hhmm(dec):
+    """Convertit décimal en HH:MM"""
     if pd.isna(dec) or abs(dec) < 0.001: return "00:00"
     abs_dec = abs(dec)
     h = int(abs_dec)
@@ -51,11 +53,28 @@ if files_hebdo and file_mensuel:
     df_m = pd.read_csv(file_mensuel, sep=";", encoding="latin1")
     df_m = df_m[df_m['Nom'].notna() & ~df_m['Nom'].astype(str).str.contains('Somme', case=False, na=False)]
     
-    # Identification robuste de la colonne Code
-    col_code = 'Code' if 'Code' in df_m.columns else df_m.columns[1]
+    # --- CORRECTION AUTOMATIQUE DES COLONNES (V1 vs V2) ---
+    # 1. Gestion "Déviation à date" vs "Déviation cumulée"
+    if 'Déviation cumulée' in df_m.columns:
+        df_m = df_m.rename(columns={'Déviation cumulée': 'Déviation à date'})
+    
+    # 2. Gestion "Code" vs "Code.1" pour le secteur
+    # On cherche la colonne qui contient des valeurs comme '011', '012'
+    col_secteur = None
+    for col in df_m.columns:
+        if 'Code' in col:
+            # On regarde si la première valeur ressemble à un code secteur (contient 11, 12, 13)
+            first_val = str(df_m[col].iloc[0])
+            if any(x in first_val for x in ['011', '012', '013', '11', '12', '13']):
+                col_secteur = col
+                break
+    
+    if not col_secteur:
+        # Fallback : on prend la 2ème colonne si elle existe, sinon la 1ère
+        col_secteur = df_m.columns[1] if len(df_m.columns) > 1 else df_m.columns[0]
 
-    # Lien pour le fichier Hebdo
-    mapping_cellule = df_m.set_index('Nom')[col_code].astype(str).to_dict()
+    # Lien Nom -> Code Secteur
+    mapping_cellule = df_m.set_index('Nom')[col_secteur].astype(str).to_dict()
 
     # 2. Traitement Hebdo
     list_dfs = [pd.read_csv(f, sep=";", encoding="latin1") for f in files_hebdo]
@@ -67,7 +86,7 @@ if files_hebdo and file_mensuel:
 
     # --- APPLICATION DU FILTRE ---
     if choix_code != "Toutes":
-        df_m = df_m[df_m[col_code].astype(str).str.contains(choix_code, na=False)].copy()
+        df_m = df_m[df_m[col_secteur].astype(str).str.contains(choix_code, na=False)].copy()
         df_h = df_h[df_h['Code_Cellule'].astype(str).str.contains(choix_code, na=False)].copy()
 
     # --- CALCULS ---
@@ -112,7 +131,6 @@ if files_hebdo and file_mensuel:
     
     show_all = st.toggle("Afficher tous les salariés de la cellule", value=False)
     
-    # On définit les lignes à afficher (Filtre réactif visuel)
     mask_ecart = (df_m['Déviation mensuelle_dec'] > 5) | (df_m['Déviation mensuelle_dec'] < -5)
     df_display = df_m if show_all else df_m[mask_ecart]
 
@@ -128,29 +146,37 @@ if files_hebdo and file_mensuel:
     )
 
     # RE-CALCUL DES TOTAUX BASÉ SUR L'ÉDITEUR
-    # On met à jour les données globales avec les modifs de l'éditeur
     df_updated = df_m.copy()
-    for _, row in edited_df.iterrows():
-        # Mise à jour de la déviation à date (conversion HH:MM -> Decimal)
-        new_val_dec = hhmm_to_decimal(row['Déviation à date'])
-        df_updated.loc[df_updated['Nom'] == row['Nom'], 'Déviation à date_dec'] = new_val_dec
-        # Sauvegarde des notes
-        st.session_state.notes[row['Nom']] = row['Justification']
+    # On met à jour df_updated avec les valeurs modifiées dans l'éditeur
+    for i, row in edited_df.iterrows():
+        # On retrouve la ligne correspondante dans df_updated par le Nom
+        idx = df_updated[df_updated['Nom'] == row['Nom']].index
+        if not idx.empty:
+             new_val_dec = hhmm_to_decimal(row['Déviation à date'])
+             df_updated.loc[idx, 'Déviation à date_dec'] = new_val_dec
+             # Sauvegarde note
+             st.session_state.notes[row['Nom']] = row['Justification']
 
     # --- BILAN CELLULE RÉACTIF ---
     st.markdown("---")
     st.subheader(f"📊 Bilan de la Cellule : {secteurs_map[choix_code]}")
     
-    # Calculs sur les données mises à jour
-    pos = df_updated[df_updated['Déviation à date_dec'] > 0]['Déviation à date_dec'].sum()
-    neg = df_updated[df_updated['Déviation à date_dec'] < 0]['Déviation à date_dec'].sum()
+    # On recalcule les sommes sur df_updated (qui contient les valeurs modifiées)
+    # Important : on doit ré-appliquer le filtre de secteur si on est en mode filtré
+    if choix_code != "Toutes":
+         df_bilan = df_updated[df_updated[col_secteur].astype(str).str.contains(choix_code, na=False)]
+    else:
+         df_bilan = df_updated
+
+    pos = df_bilan[df_bilan['Déviation à date_dec'] > 0]['Déviation à date_dec'].sum()
+    neg = df_bilan[df_bilan['Déviation à date_dec'] < 0]['Déviation à date_dec'].sum()
     solde = pos + neg
     
     m1, m2, m3 = st.columns(3)
     m1.metric("Cumul Positif (+)", decimal_to_hhmm(pos))
     m2.metric("Cumul Négatif (-)", decimal_to_hhmm(neg))
-    m3.metric("Rapport Net (Solde Cellule)", decimal_to_hhmm(solde), 
-              delta="À combler" if solde < 0 else "Surplus", 
+    m3.metric("Solde Cellule", decimal_to_hhmm(solde), 
+              delta="Déficit" if solde < 0 else "Surplus", 
               delta_color="inverse" if solde < 0 else "normal")
 
 else:
