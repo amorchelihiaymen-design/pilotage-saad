@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import io
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Pilotage IDF - Secteurs", layout="wide")
@@ -16,28 +17,23 @@ st.markdown("""
 st.sidebar.title("📁 Importation des Données")
 uploaded_file = st.sidebar.file_uploader("Charger le fichier Ximi (Excel ou CSV)", type=['xlsx', 'csv'])
 
-# Initialisation du DataFrame dans la session s'il n'existe pas
 if 'df_modulation' not in st.session_state:
     st.session_state.df_modulation = None
 
-# Chargement initial du fichier
 if uploaded_file is not None and st.session_state.df_modulation is None:
     if uploaded_file.name.endswith('.csv'):
         st.session_state.df_modulation = pd.read_csv(uploaded_file)
     else:
         st.session_state.df_modulation = pd.read_excel(uploaded_file)
 
-# --- 2. FILTRES ET INTERFACE ---
+# --- 2. INTERFACE DE PILOTAGE ---
 if st.session_state.df_modulation is not None:
-    # Nettoyage rapide (on s'assure que le terme Secteur est présent)
     df = st.session_state.df_modulation
-
+    
     st.sidebar.divider()
-    st.sidebar.title("🛠️ Paramètres de Pilotage")
+    st.sidebar.title("🛠️ Paramètres")
     
-    # On cherche la colonne Secteur (ou on la crée pour l'exemple si elle manque)
     col_secteur = 'Secteur' if 'Secteur' in df.columns else df.columns[0]
-    
     secteurs_disponibles = ["Tous"] + list(df[col_secteur].unique())
     secteur_choisi = st.sidebar.selectbox("Sélectionner le Secteur", secteurs_disponibles)
 
@@ -52,7 +48,6 @@ if st.session_state.df_modulation is not None:
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        # On adapte les noms de colonnes selon ton fichier (ex: 'Heures Réalisées')
         val_h = df_filtre['Heures_Réalisées'].sum() if 'Heures_Réalisées' in df_filtre.columns else 0
         st.metric("Total Heures Réalisées", f"{val_h}h")
     with col2:
@@ -64,35 +59,51 @@ if st.session_state.df_modulation is not None:
 
     st.divider()
 
-    # --- 4. ÉDITEUR (FONCTIONNEL) ---
-    st.subheader("📝 Analyse et Ajustement des Secteurs")
+    # --- 4. ÉDITEUR ---
+    st.subheader("📝 Analyse et Ajustement")
+    edited_df = st.data_editor(df_filtre, use_container_width=True, num_rows="dynamic", key="main_editor")
+
+    if st.button("✅ Valider les modifications en mémoire"):
+        if secteur_choisi == "Tous":
+            st.session_state.df_modulation = edited_df
+        else:
+            st.session_state.df_modulation.update(edited_df)
+        st.success("Données mises à jour dans l'application.")
+
+    # --- 5. EXPORTATION DES DEUX DOCUMENTS ---
+    st.sidebar.divider()
+    st.sidebar.title("📤 Exporter les résultats")
     
-    # L'éditeur modifie directement une COPIE de la session
-    edited_df = st.data_editor(
-        df_filtre,
-        key="editor_modulation",
-        use_container_width=True,
-        num_rows="dynamic"
+    # Préparation du CSV
+    csv = st.session_state.df_modulation.to_csv(index=False).encode('utf-8')
+    st.sidebar.download_button(
+        label="📥 Télécharger en CSV",
+        data=csv,
+        file_name='modulation_idf_MAJ.csv',
+        mime='text/csv',
     )
 
-    if st.button("💾 Enregistrer les modifications pour ce Secteur"):
-        # On réintègre les lignes modifiées dans le DataFrame principal
-        st.session_state.df_modulation.update(edited_df)
-        st.success("Les modifications ont été mémorisées dans le système.")
-
-    # --- 5. GRAPHIQUE (CELUI QUE TU AIMES) ---
-    st.divider()
-    st.subheader("📈 Visualisation de la Modulation par Salarié")
+    # Préparation de l'Excel (plus complexe car nécessite un buffer)
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+        st.session_state.df_modulation.to_excel(writer, index=False, sheet_name='Modulation')
     
+    st.sidebar.download_button(
+        label="📥 Télécharger en Excel",
+        data=buffer.getvalue(),
+        file_name='modulation_idf_MAJ.xlsx',
+        mime='application/vnd.ms-excel'
+    )
+
+    # --- 6. GRAPHIQUE ---
+    st.divider()
     if 'Salarié' in df_filtre.columns and 'Modulation_Cumulée' in df_filtre.columns:
+        st.subheader("📈 Vue graphique de la Modulation")
         st.bar_chart(data=df_filtre, x='Salarié', y='Modulation_Cumulée')
-    else:
-        st.info("Veuillez vérifier que les colonnes 'Salarié' et 'Modulation_Cumulée' existent pour afficher le graphique.")
 
 else:
     st.title("Bienvenue dans l'outil de Pilotage IDF")
-    st.info("Veuillez charger un fichier dans la barre latérale pour commencer l'analyse par secteur.")
+    st.info("Veuillez charger un fichier Ximi pour activer les fonctions d'export.")
 
-# Footer personnalisé
 st.sidebar.divider()
-st.sidebar.caption("Expertise Data & Optimisation Process | Aymen Amor")
+st.sidebar.caption("Aymen Amor | Expert Data & Optimisation")
