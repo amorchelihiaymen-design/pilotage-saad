@@ -13,97 +13,115 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 1. GESTION DE L'UPLOAD ET DE LA MÉMOIRE ---
-st.sidebar.title("📁 Importation des Données")
-uploaded_file = st.sidebar.file_uploader("Charger le fichier Ximi (Excel ou CSV)", type=['xlsx', 'csv'])
+# --- INITIALISATION DE LA MÉMOIRE (SESSION STATE) ---
+if 'df_mensuel' not in st.session_state:
+    st.session_state.df_mensuel = None
+if 'df_hebdo' not in st.session_state:
+    st.session_state.df_hebdo = None
 
-if 'df_modulation' not in st.session_state:
-    st.session_state.df_modulation = None
+# --- SIDEBAR : IMPORTATION ---
+st.sidebar.title("📁 Importation Ximi")
+st.sidebar.info("Chargez les deux fichiers pour activer les exports correspondants.")
 
-if uploaded_file is not None and st.session_state.df_modulation is None:
-    if uploaded_file.name.endswith('.csv'):
-        st.session_state.df_modulation = pd.read_csv(uploaded_file)
+file_mensuel = st.sidebar.file_uploader("1. Export MENSUEL (Modulation)", type=['csv', 'xlsx'])
+file_hebdo = st.sidebar.file_uploader("2. Export HEBDO (Alertes)", type=['csv', 'xlsx'])
+
+# Chargement Mensuel (avec séparateur ;)
+if file_mensuel and st.session_state.df_mensuel is None:
+    if file_mensuel.name.endswith('.csv'):
+        st.session_state.df_mensuel = pd.read_csv(file_mensuel, sep=';')
     else:
-        st.session_state.df_modulation = pd.read_excel(uploaded_file)
+        st.session_state.df_mensuel = pd.read_excel(file_mensuel)
 
-# --- 2. INTERFACE DE PILOTAGE ---
-if st.session_state.df_modulation is not None:
-    df = st.session_state.df_modulation
-    
-    st.sidebar.divider()
-    st.sidebar.title("🛠️ Paramètres")
-    
-    col_secteur = 'Secteur' if 'Secteur' in df.columns else df.columns[0]
-    secteurs_disponibles = ["Tous"] + list(df[col_secteur].unique())
-    secteur_choisi = st.sidebar.selectbox("Sélectionner le Secteur", secteurs_disponibles)
-
-    # Filtrage
-    if secteur_choisi == "Tous":
-        df_filtre = df
+# Chargement Hebdo (avec séparateur ;)
+if file_hebdo and st.session_state.df_hebdo is None:
+    if file_hebdo.name.endswith('.csv'):
+        st.session_state.df_hebdo = pd.read_csv(file_hebdo, sep=';')
     else:
-        df_filtre = df[df[col_secteur] == secteur_choisi]
+        st.session_state.df_hebdo = pd.read_excel(file_hebdo)
 
-    # --- 3. DASHBOARD VISUEL ---
-    st.title(f"📊 Tableau de Bord : {secteur_choisi}")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        val_h = df_filtre['Heures_Réalisées'].sum() if 'Heures_Réalisées' in df_filtre.columns else 0
-        st.metric("Total Heures Réalisées", f"{val_h}h")
-    with col2:
-        alertes = len(df_filtre[df_filtre['Statut_34h_40h'] == 'ALERTE']) if 'Statut_34h_40h' in df_filtre.columns else 0
-        st.metric("Alertes Conformité", alertes)
-    with col3:
-        mod_moy = df_filtre['Modulation_Cumulée'].mean() if 'Modulation_Cumulée' in df_filtre.columns else 0
-        st.metric("Moyenne Modulation", f"{round(mod_moy, 2)}h")
+# Bouton de réinitialisation
+if st.sidebar.button("🗑️ Réinitialiser les données"):
+    st.session_state.df_mensuel = None
+    st.session_state.df_hebdo = None
+    st.rerun()
 
-    st.divider()
+# --- INTERFACE PRINCIPALE ---
+st.title("🚀 Pilotage & Optimisation IDF")
 
-    # --- 4. ÉDITEUR ---
-    st.subheader("📝 Analyse et Ajustement")
-    edited_df = st.data_editor(df_filtre, use_container_width=True, num_rows="dynamic", key="main_editor")
-
-    if st.button("✅ Valider les modifications en mémoire"):
-        if secteur_choisi == "Tous":
-            st.session_state.df_modulation = edited_df
-        else:
-            st.session_state.df_modulation.update(edited_df)
-        st.success("Données mises à jour dans l'application.")
-
-    # --- 5. EXPORTATION DES DEUX DOCUMENTS ---
-    st.sidebar.divider()
-    st.sidebar.title("📤 Exporter les résultats")
-    
-    # Préparation du CSV
-    csv = st.session_state.df_modulation.to_csv(index=False).encode('utf-8')
-    st.sidebar.download_button(
-        label="📥 Télécharger en CSV",
-        data=csv,
-        file_name='modulation_idf_MAJ.csv',
-        mime='text/csv',
-    )
-
-    # Préparation de l'Excel (plus complexe car nécessite un buffer)
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-        st.session_state.df_modulation.to_excel(writer, index=False, sheet_name='Modulation')
-    
-    st.sidebar.download_button(
-        label="📥 Télécharger en Excel",
-        data=buffer.getvalue(),
-        file_name='modulation_idf_MAJ.xlsx',
-        mime='application/vnd.ms-excel'
-    )
-
-    # --- 6. GRAPHIQUE ---
-    st.divider()
-    if 'Salarié' in df_filtre.columns and 'Modulation_Cumulée' in df_filtre.columns:
-        st.subheader("📈 Vue graphique de la Modulation")
-        st.bar_chart(data=df_filtre, x='Salarié', y='Modulation_Cumulée')
-
+if st.session_state.df_mensuel is None and st.session_state.df_hebdo is None:
+    st.info("Veuillez charger vos fichiers Ximi dans la barre latérale pour commencer.")
 else:
-    st.title("Bienvenue dans l'outil de Pilotage IDF")
-    st.info("Veuillez charger un fichier Ximi pour activer les fonctions d'export.")
+    # Création des onglets pour séparer les deux flux
+    tab_mois, tab_semaine = st.tabs(["📊 Suivi Mensuel (Modulation)", "📅 Suivi Hebdomadaire"])
 
+    # --- ONGLET MENSUEL ---
+    with tab_mois:
+        if st.session_state.df_mensuel is not None:
+            df_m = st.session_state.df_mensuel
+            
+            # Gestion du secteur
+            col_sec = 'Secteur intervenant' if 'Secteur intervenant' in df_m.columns else df_m.columns[1]
+            secteurs = ["Tous"] + sorted(list(df_m[col_sec].unique()))
+            sel_sec = st.selectbox("Filtrer par Secteur", secteurs, key="sel_m")
+            
+            df_m_filtered = df_m if sel_sec == "Tous" else df_m[df_m[col_sec] == sel_sec]
+
+            # Dashboard Visuel
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                h_eff = df_m_filtered['Total heures travail effectif'].replace(',', '.', regex=True).astype(float).sum() if 'Total heures travail effectif' in df_m_filtered.columns else 0
+                st.metric("Total Travail Effectif", f"{round(h_eff, 2)}h")
+            with c2:
+                mod_total = df_m_filtered['Déviation'].replace(',', '.', regex=True).astype(float).sum() if 'Déviation' in df_m_filtered.columns else 0
+                st.metric("Modulation Secteur", f"{round(mod_total, 2)}h")
+            
+            st.divider()
+            
+            # ÉDITEUR (MENSUEL)
+            st.subheader("📝 Correction des compteurs Mensuels")
+            edited_m = st.data_editor(df_m_filtered, use_container_width=True, num_rows="dynamic", key="editor_mensuel")
+            
+            if st.button("✅ Valider les modifs Mensuelles"):
+                st.session_state.df_mensuel.update(edited_m)
+                st.success("Données mensuelles mises à jour !")
+
+            # BOUTON EXPORT CSV MENSUEL
+            csv_m = st.session_state.df_mensuel.to_csv(index=False, sep=';').encode('utf-8-sig')
+            st.download_button(
+                label="📥 Télécharger EXPORT MENSUEL (CSV)",
+                data=csv_m,
+                file_name='Export_Compteurs_Mensuels_MAJ.csv',
+                mime='text/csv',
+            )
+        else:
+            st.warning("En attente de l'export mensuel...")
+
+    # --- ONGLET HEBDO ---
+    with tab_semaine:
+        if st.session_state.df_hebdo is not None:
+            df_h = st.session_state.df_hebdo
+            
+            st.subheader("📝 Analyse des compteurs Hebdomadaires")
+            
+            # ÉDITEUR (HEBDO)
+            edited_h = st.data_editor(df_h, use_container_width=True, num_rows="dynamic", key="editor_hebdo")
+            
+            if st.button("✅ Valider les modifs Hebdo"):
+                st.session_state.df_hebdo.update(edited_h)
+                st.success("Données hebdomadaires mises à jour !")
+
+            # BOUTON EXPORT CSV HEBDO
+            csv_h = st.session_state.df_hebdo.to_csv(index=False, sep=';').encode('utf-8-sig')
+            st.download_button(
+                label="📥 Télécharger EXPORT HEBDO (CSV)",
+                data=csv_h,
+                file_name='Export_Compteurs_Hebdo_MAJ.csv',
+                mime='text/csv',
+            )
+        else:
+            st.warning("En attente de l'export hebdomadaire...")
+
+# Footer
 st.sidebar.divider()
-st.sidebar.caption("Aymen Amor | Expert Data & Optimisation")
+st.sidebar.caption("Aymen Amor | emlyon Data Science | Agence Saint-Denis")
