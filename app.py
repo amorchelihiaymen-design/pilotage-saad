@@ -1,10 +1,10 @@
 import streamlit as st
 import pandas as pd
 
-# --- CONFIGURATION DE LA PAGE ---
-st.set_page_config(page_title="Pilotage Modulation IDF", layout="wide")
+# --- CONFIGURATION ---
+st.set_page_config(page_title="Pilotage IDF - Secteurs", layout="wide")
 
-# --- STYLE CSS POUR UN RENDU PROFESSIONNEL (SIÈGE) ---
+# --- STYLE ---
 st.markdown("""
     <style>
     .main { background-color: #f5f7f9; }
@@ -12,87 +12,87 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 1. INITIALISATION DES DONNÉES (Session State) ---
-# Ce bloc permet de garder les modifications en mémoire malgré les rechargements de Streamlit
+# --- 1. GESTION DE L'UPLOAD ET DE LA MÉMOIRE ---
+st.sidebar.title("📁 Importation des Données")
+uploaded_file = st.sidebar.file_uploader("Charger le fichier Ximi (Excel ou CSV)", type=['xlsx', 'csv'])
+
+# Initialisation du DataFrame dans la session s'il n'existe pas
 if 'df_modulation' not in st.session_state:
-    # Simulation de données (à remplacer par ton pd.read_excel ou pd.read_csv)
-    data = {
-        'Secteur': ['Secteur 011', 'Secteur 012', 'Secteur 011', 'Secteur 013', 'Secteur 012'],
-        'Salarié': ['Amina B.', 'Thomas D.', 'Yacine K.', 'Julie L.', 'Marc O.'],
-        'Heures_Contrat': [130, 151.67, 130, 100, 151.67],
-        'Heures_Réalisées': [145, 140, 165, 95, 155],
-        'Modulation_Cumulée': [15, -11.67, 35, -5, 3.33],
-        'Statut_34h_40h': ['Conforme', 'Conforme', 'ALERTE', 'Conforme', 'Conforme']
-    }
-    st.session_state.df_modulation = pd.DataFrame(data)
+    st.session_state.df_modulation = None
 
-# --- 2. BARRE LATÉRALE (FILTRES) ---
-st.sidebar.title("🛠️ Paramètres de Pilotage")
-st.sidebar.info("Outil d'optimisation des process - Région IDF")
+# Chargement initial du fichier
+if uploaded_file is not None and st.session_state.df_modulation is None:
+    if uploaded_file.name.endswith('.csv'):
+        st.session_state.df_modulation = pd.read_csv(uploaded_file)
+    else:
+        st.session_state.df_modulation = pd.read_excel(uploaded_file)
 
-# Filtre par Secteur
-secteurs_disponibles = ["Tous"] + list(st.session_state.df_modulation['Secteur'].unique())
-secteur_choisi = st.sidebar.selectbox("Sélectionner le Secteur", secteurs_disponibles)
+# --- 2. FILTRES ET INTERFACE ---
+if st.session_state.df_modulation is not None:
+    # Nettoyage rapide (on s'assure que le terme Secteur est présent)
+    df = st.session_state.df_modulation
 
-# Filtrage du DataFrame pour l'affichage
-if secteur_choisi == "Tous":
-    df_a_afficher = st.session_state.df_modulation
+    st.sidebar.divider()
+    st.sidebar.title("🛠️ Paramètres de Pilotage")
+    
+    # On cherche la colonne Secteur (ou on la crée pour l'exemple si elle manque)
+    col_secteur = 'Secteur' if 'Secteur' in df.columns else df.columns[0]
+    
+    secteurs_disponibles = ["Tous"] + list(df[col_secteur].unique())
+    secteur_choisi = st.sidebar.selectbox("Sélectionner le Secteur", secteurs_disponibles)
+
+    # Filtrage
+    if secteur_choisi == "Tous":
+        df_filtre = df
+    else:
+        df_filtre = df[df[col_secteur] == secteur_choisi]
+
+    # --- 3. DASHBOARD VISUEL ---
+    st.title(f"📊 Tableau de Bord : {secteur_choisi}")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        # On adapte les noms de colonnes selon ton fichier (ex: 'Heures Réalisées')
+        val_h = df_filtre['Heures_Réalisées'].sum() if 'Heures_Réalisées' in df_filtre.columns else 0
+        st.metric("Total Heures Réalisées", f"{val_h}h")
+    with col2:
+        alertes = len(df_filtre[df_filtre['Statut_34h_40h'] == 'ALERTE']) if 'Statut_34h_40h' in df_filtre.columns else 0
+        st.metric("Alertes Conformité", alertes)
+    with col3:
+        mod_moy = df_filtre['Modulation_Cumulée'].mean() if 'Modulation_Cumulée' in df_filtre.columns else 0
+        st.metric("Moyenne Modulation", f"{round(mod_moy, 2)}h")
+
+    st.divider()
+
+    # --- 4. ÉDITEUR (FONCTIONNEL) ---
+    st.subheader("📝 Analyse et Ajustement des Secteurs")
+    
+    # L'éditeur modifie directement une COPIE de la session
+    edited_df = st.data_editor(
+        df_filtre,
+        key="editor_modulation",
+        use_container_width=True,
+        num_rows="dynamic"
+    )
+
+    if st.button("💾 Enregistrer les modifications pour ce Secteur"):
+        # On réintègre les lignes modifiées dans le DataFrame principal
+        st.session_state.df_modulation.update(edited_df)
+        st.success("Les modifications ont été mémorisées dans le système.")
+
+    # --- 5. GRAPHIQUE (CELUI QUE TU AIMES) ---
+    st.divider()
+    st.subheader("📈 Visualisation de la Modulation par Salarié")
+    
+    if 'Salarié' in df_filtre.columns and 'Modulation_Cumulée' in df_filtre.columns:
+        st.bar_chart(data=df_filtre, x='Salarié', y='Modulation_Cumulée')
+    else:
+        st.info("Veuillez vérifier que les colonnes 'Salarié' et 'Modulation_Cumulée' existent pour afficher le graphique.")
+
 else:
-    df_a_afficher = st.session_state.df_modulation[st.session_state.df_modulation['Secteur'] == secteur_choisi]
+    st.title("Bienvenue dans l'outil de Pilotage IDF")
+    st.info("Veuillez charger un fichier dans la barre latérale pour commencer l'analyse par secteur.")
 
-# --- 3. DASHBOARD : INDICATEURS CLÉS (KPI) ---
-st.title(f"📊 Tableau de Bord : {secteur_choisi}")
-
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.metric("Total Heures Réalisées", f"{df_a_afficher['Heures_Réalisées'].sum()}h")
-with col2:
-    alertes = len(df_a_afficher[df_a_afficher['Statut_34h_40h'] == 'ALERTE'])
-    st.metric("Alertes Conformité (34h/40h)", alertes, delta="-2" if alertes > 0 else "0", delta_color="inverse")
-with col3:
-    st.metric("Moyenne Modulation", f"{round(df_a_afficher['Modulation_Cumulée'].mean(), 2)}h")
-
-st.divider()
-
-# --- 4. ÉDITEUR DE DONNÉES (CORRECTION DU BUG) ---
-st.subheader("📝 Analyse et Ajustement des Secteurs")
-st.write("Modifiez les valeurs ci-dessous pour simuler des régularisations ou corriger les saisies Ximi.")
-
-# On utilise st.data_editor avec une clé unique. 
-# Les changements sont capturés dans 'edited_df'
-edited_df = st.data_editor(
-    df_a_afficher,
-    key="editor_modulation",
-    num_rows="dynamic",
-    use_container_width=True
-)
-
-# --- 5. SAUVEGARDE DES MODIFICATIONS ---
-col_btn1, col_btn2 = st.columns([1, 4])
-with col_btn1:
-    if st.button("💾 Enregistrer les modifications"):
-        # Mise à jour du dataframe principal dans le session_state
-        if secteur_choisi == "Tous":
-            st.session_state.df_modulation = edited_df
-        else:
-            # On met à jour uniquement les lignes du secteur choisi
-            st.session_state.df_modulation.update(edited_df)
-        
-        st.success("Données du secteur mises à jour !")
-        # Optionnel : décommenter pour sauvegarder réellement dans ton fichier
-        # st.session_state.df_modulation.to_excel("suivi_modulation_idf.xlsx", index=False)
-
-with col_btn2:
-    if st.button("🚀 Générer Rapport Audit"):
-        st.info("Génération du rapport d'optimisation en cours pour la direction de filière...")
-
-# --- 6. VISUALISATION (DATA SCIENCE) ---
-st.divider()
-st.subheader("📈 Visualisation de la Modulation par Salarié")
-if not df_a_afficher.empty:
-    st.bar_chart(data=df_a_afficher, x='Salarié', y='Modulation_Cumulée')
-else:
-    st.warning("Aucune donnée disponible pour ce secteur.")
-
+# Footer personnalisé
 st.sidebar.divider()
-st.sidebar.caption("Développé par Aymen Amor - Expertise Data & Optimisation Process")
+st.sidebar.caption("Expertise Data & Optimisation Process | Aymen Amor")
