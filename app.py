@@ -40,7 +40,6 @@ def robust_read_csv(file):
     """Lecture et nettoyage des exports Ximi"""
     try:
         df = pd.read_csv(file, sep=';', encoding='latin-1')
-        # Colonnes numériques potentielles (on nettoie les virgules)
         cols_numeriques = [
             'Hres de base', 'Hres trajet', 'Hres inactivité', 
             'Hres evts. interv.', 'Hres CP', 'Total heures travail effectif', 'Déviation',
@@ -105,7 +104,7 @@ else:
             else:
                 df_filt = df_temp
 
-            # CALCUL DES NOUVELLES METRICS (Déviation)
+            # CALCUL DES METRICS
             if 'Déviation' in df_filt.columns:
                 series_dev = df_filt['Déviation']
                 pos_dev = series_dev[series_dev > 0].sum()
@@ -121,11 +120,11 @@ else:
 
             st.divider()
             
-            # --- MASQUAGE DES COLONNES MENSUEL ---
+            # --- ANALYSE & ÉDITION ---
+            st.subheader("📝 Analyse & Édition")
             hidden_mensuel = ['Entité', 'Type', 'Début période', 'Fin période', 'Hres inactivité', 'Hres CP', 'Bulletin de paie', 'Calcul manuel ?', 'A recalculer', 'Dernier recalcul']
             visible_mensuel = [c for c in df_filt.columns if c not in hidden_mensuel]
             
-            st.subheader("📝 Analyse & Édition")
             edited = st.data_editor(
                 df_filt, 
                 use_container_width=True, 
@@ -139,12 +138,34 @@ else:
                 }
             )
             
-            if st.button("💾 Enregistrer les modifications"):
-                st.session_state.df_mensuel.update(edited)
-                st.success("Données enregistrées !")
+            col_btn1, col_btn2 = st.columns([1, 4])
+            with col_btn1:
+                if st.button("💾 Enregistrer"):
+                    st.session_state.df_mensuel.update(edited)
+                    st.success("Enregistré !")
+            with col_btn2:
+                csv_data = st.session_state.df_mensuel.to_csv(index=False, sep=';', encoding='utf-8-sig').encode('utf-8-sig')
+                st.download_button("📥 Télécharger CSV corrigé", data=csv_data, file_name="Modulation_Mensuelle_MAJ.csv")
 
-            csv_data = st.session_state.df_mensuel.to_csv(index=False, sep=';', encoding='utf-8-sig').encode('utf-8-sig')
-            st.download_button("📥 Télécharger CSV corrigé", data=csv_data, file_name="Modulation_Mensuelle_MAJ.csv")
+            # --- GRAPHIQUE DE PILOTAGE ---
+            st.divider()
+            st.subheader("📈 Vue d'ensemble de la Modulation")
+            
+            if not df_filt.empty and 'Déviation' in df_filt.columns:
+                # Préparation des données pour le graphique : on trie par déviation pour la clarté
+                df_chart = df_filt[['Intervenant', 'Déviation']].copy()
+                df_chart = df_chart.sort_values(by='Déviation', ascending=False)
+                
+                # Affichage du graphique à barres
+                st.bar_chart(
+                    data=df_chart, 
+                    x='Intervenant', 
+                    y='Déviation', 
+                    use_container_width=True
+                )
+                st.caption("💡 Les barres positives représentent les heures à régulariser, les barres négatives la sous-activité.")
+            else:
+                st.info("Aucune donnée disponible pour générer le graphique.")
 
     # --- ONGLET HEBDO ---
     with tab_h:
@@ -152,18 +173,10 @@ else:
             df_h = st.session_state.df_hebdo.copy()
             st.subheader("📅 Audit Hebdomadaire")
             
-            # --- MASQUAGE DES COLONNES HEBDO ---
             hidden_hebdo = ['Contrat', 'Début contrat', 'Année', 'Heures inactivité', 'Heures internes', 'Heures absences', 'Heures absences maintien']
             visible_hebdo = [c for c in df_h.columns if c not in hidden_hebdo]
 
-            edited_h = st.data_editor(
-                df_h, 
-                use_container_width=True, 
-                num_rows="dynamic", 
-                key="ed_h", 
-                hide_index=True,
-                column_order=visible_hebdo
-            )
+            edited_h = st.data_editor(df_h, use_container_width=True, num_rows="dynamic", key="ed_h", hide_index=True, column_order=visible_hebdo)
             
             if st.button("💾 Enregistrer Hebdo"):
                 st.session_state.df_hebdo.update(edited_h)
