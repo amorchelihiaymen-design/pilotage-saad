@@ -19,14 +19,6 @@ st.markdown("""
     }
     [data-testid="stMetricLabel"] { color: #64748b !important; font-weight: 600 !important; }
     [data-testid="stMetricValue"] { color: #1E3A8A !important; font-weight: 800 !important; }
-    
-    .alert-card {
-        padding: 15px;
-        border-radius: 10px;
-        margin-bottom: 10px;
-        border-left: 5px solid #ef4444;
-        background-color: #fef2f2;
-    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -72,7 +64,7 @@ if 'df_h' not in st.session_state: st.session_state.df_h = None
 
 # --- SIDEBAR ---
 st.sidebar.title("📁 Importation Ximi")
-f_m = st.sidebar.file_uploader("1. Export MENSUEL", type=['csv'])
+f_m = st.sidebar.file_uploader("1. Export MENSUEL (Source Secteurs)", type=['csv'])
 f_h = st.sidebar.file_uploader("2. Export HEBDO", type=['csv'])
 
 if f_m and st.session_state.df_m is None: st.session_state.df_m = robust_read_csv(f_m)
@@ -87,116 +79,94 @@ if st.sidebar.button("🗑️ Réinitialiser"):
 st.title("🚀 Pilotage & Optimisation IDF")
 
 if st.session_state.df_m is None and st.session_state.df_h is None:
-    st.info("👋 Bienvenue Aymen. Veuillez charger vos exports pour démarrer l'audit.")
+    st.info("Veuillez charger vos exports pour démarrer l'audit par secteur.")
 else:
-    tab_m, tab_h = st.tabs(["📊 Suivi Mensuel (Modulation)", "📅 Suivi Hebdo (Alertes)"])
+    # --- LOGIQUE DE MAPPING DES SECTEURS ---
+    # On crée un dictionnaire {Nom Intervenant: Secteur} à partir du mensuel
+    mapping_secteurs = {}
+    if st.session_state.df_m is not None:
+        df_src = st.session_state.df_m
+        col_sec_src = 'Secteur intervenant' if 'Secteur intervenant' in df_src.columns else df_src.columns[1]
+        mapping_secteurs = df_src.drop_duplicates('Intervenant').set_index('Intervenant')[col_sec_src].to_dict()
+
+    tab_m, tab_h = st.tabs(["📊 Suivi Mensuel", "📅 Suivi Hebdo & Alertes"])
 
     # --- ONGLET MENSUEL ---
     with tab_m:
         if st.session_state.df_m is not None:
             df = st.session_state.df_m.copy()
             col_sec = 'Secteur intervenant' if 'Secteur intervenant' in df.columns else df.columns[1]
-            list_secteurs = ["Tous"] + sorted([str(s) for s in df[col_sec].unique()])
-            sel_sec = st.selectbox("Filtrer par Secteur", list_secteurs, key="m_sec")
-            df_filt = df if sel_sec == "Tous" else df[df[col_sec] == sel_sec]
+            secteurs = ["Tous"] + sorted([str(s) for s in df[col_sec].unique() if pd.notna(s)])
+            sel_sec_m = st.selectbox("Secteur (Mensuel)", secteurs, key="m_sec")
+            df_filt_m = df if sel_sec_m == "Tous" else df[df[col_sec] == sel_sec_m]
 
             # Metrics
-            dev_pos = df_filt['Déviation'][df_filt['Déviation'] > 0].sum()
-            dev_neg = df_filt['Déviation'][df_filt['Déviation'] < 0].sum()
-            balance = df_filt['Déviation'].sum()
-
+            dev_pos = df_filt_m['Déviation'][df_filt_m['Déviation'] > 0].sum()
+            dev_neg = df_filt_m['Déviation'][df_filt_m['Déviation'] < 0].sum()
             c1, c2, c3 = st.columns(3)
-            with c1: st.metric("Déviations (+) (A payer)", to_hhmm(dev_pos))
-            with c2: st.metric("Déviations (-) (A rattraper)", to_hhmm(dev_neg))
-            with c3: st.metric("Balance Globale", to_hhmm(balance), delta=to_hhmm(balance))
+            with c1: st.metric("Déviations (+)", to_hhmm(dev_pos))
+            with c2: st.metric("Déviations (-)", to_hhmm(dev_neg))
+            with c3: st.metric("Balance", to_hhmm(df_filt_m['Déviation'].sum()))
 
             st.divider()
-            st.subheader("📝 Analyse & Édition")
             hidden_m = ['Entité', 'Type', 'Début période', 'Fin période', 'Hres inactivité', 'Hres CP', 'Bulletin de paie', 'Calcul manuel ?', 'A recalculer', 'Dernier recalcul']
-            visible_m = [c for c in df_filt.columns if c not in hidden_m]
-            
-            edited_m = st.data_editor(df_filt, use_container_width=True, num_rows="dynamic", key="ed_m", hide_index=True, column_order=visible_m)
-            
-            if st.button("💾 Enregistrer le Mensuel"):
-                st.session_state.df_m.update(edited_m)
-                st.success("Modifications enregistrées !")
+            st.data_editor(df_filt_m, use_container_width=True, hide_index=True, column_order=[c for c in df_filt_m.columns if c not in hidden_m])
 
     # --- ONGLET HEBDO ---
     with tab_h:
         if st.session_state.df_h is not None:
             df_h = st.session_state.df_h.copy()
-            st.subheader("📅 Audit Hebdomadaire")
             
-            # Masquage colonnes hebdo
+            # Application du Secteur dans l'Hebdo via le mapping
+            df_h['Secteur'] = df_h['Intervenant'].map(mapping_secteurs).fillna("Non répertorié")
+            
+            # Filtre par Secteur (Synchronisé ou indépendant)
+            list_sec_h = ["Tous"] + sorted([str(s) for s in df_h['Secteur'].unique()])
+            sel_sec_h = st.selectbox("Filtrer l'Hebdo par Secteur", list_sec_h, key="h_sec")
+            df_filt_h = df_h if sel_sec_h == "Tous" else df_h[df_h['Secteur'] == sel_sec_h]
+
+            st.subheader(f"📅 Audit Hebdomadaire : {sel_sec_h}")
             hidden_h = ['Contrat', 'Début contrat', 'Année', 'Heures inactivité', 'Heures internes', 'Heures absences', 'Heures absences maintien']
-            visible_h = [c for c in df_h.columns if c not in hidden_h]
+            st.data_editor(df_filt_h, use_container_width=True, hide_index=True, column_order=[c for c in df_filt_h.columns if c not in hidden_h])
 
-            edited_h = st.data_editor(df_h, use_container_width=True, num_rows="dynamic", key="ed_h", hide_index=True, column_order=visible_h)
-            
-            if st.button("💾 Enregistrer l'Hebdo"):
-                st.session_state.df_h.update(edited_h)
-                st.success("Modifications hebdo enregistrées !")
-
-            # --- SECTION ALERTES PEPS & INTERACTIF ---
+            # --- ANALYSE DE CONFORMITÉ (34H/40H/TIERS) ---
             st.divider()
-            st.markdown("### 🔔 Analyse de Conformité Réglementaire")
+            st.markdown("### 🔔 Alertes de Conformité")
             
-            # Calcul de la logique métier
-            df_h['Total_Dec'] = df_h['Heures totales'].apply(hhmm_to_decimal)
-            df_h['Is_TempsPlein'] = df_h['Heures hebdo contrat'] >= 35
+            df_filt_h['Total_Dec'] = df_filt_h['Heures totales'].apply(hhmm_to_decimal)
+            df_filt_h['Is_TempsPlein'] = df_filt_h['Heures hebdo contrat'] >= 35
             
-            # Conditions d'alertes
-            def check_alert(row):
+            def analyze_risk(row):
                 if not row['Is_TempsPlein']:
-                    # Temps partiel
-                    if row['Total_Dec'] > 34: return "⚠️ Seuil 34h dépassé"
+                    if row['Total_Dec'] > 34: return "🚫 Dépassement Seuil 34h"
                     if (row['Total_Dec'] - row['Heures hebdo contrat']) > (row['Heures hebdo contrat'] / 3): 
-                        return "🔴 Dépassement 1/3 Contrat"
+                        return "🔴 > 1/3 Temps Partiel"
                 else:
-                    # Temps plein
                     if row['Total_Dec'] > 40: return "🚫 Dépassement 40h (Temps Plein)"
                 return "✅ Conforme"
 
-            df_h['Diagnostic'] = df_h.apply(check_alert, axis=1)
-            df_alerts = df_h[df_h['Diagnostic'] != "✅ Conforme"].copy()
+            df_filt_h['Diagnostic'] = df_filt_h.apply(analyze_risk, axis=1)
+            df_alerts = df_filt_h[df_filt_h['Diagnostic'] != "✅ Conforme"].copy()
 
-            # Widgets d'alertes "Peps"
+            # Affichage des KPIs d'alertes
             a1, a2, a3 = st.columns(3)
-            with a1:
-                nb_34 = len(df_h[df_h['Diagnostic'].str.contains("34h")])
-                st.metric("Alertes 34h", nb_34, delta="Risque Requalif.", delta_color="inverse")
-            with a2:
-                nb_13 = len(df_h[df_h['Diagnostic'].str.contains("1/3")])
-                st.metric("Alertes 1/3 Contrat", nb_13, delta="Limite Légale", delta_color="inverse")
-            with a3:
-                nb_40 = len(df_h[df_h['Diagnostic'].str.contains("40h")])
-                st.metric("Alertes 40h (TP)", nb_40, delta="Alerte Sécurité", delta_color="inverse")
+            with a1: st.metric("Alertes 34h", len(df_filt_h[df_filt_h['Diagnostic'].str.contains("34h")]))
+            with a2: st.metric("Alertes 1/3 Contrat", len(df_filt_h[df_filt_h['Diagnostic'].str.contains("1/3")]))
+            with a3: st.metric("Alertes 40h (TP)", len(df_filt_h[df_filt_h['Diagnostic'].str.contains("40h")]))
 
             if not df_alerts.empty:
-                st.error(f"Attention : {len(df_alerts)} anomalies détectées nécessitant une action immédiate.")
+                st.dataframe(df_alerts[['Intervenant', 'Heures hebdo contrat', 'Heures totales', 'Diagnostic']], use_container_width=True, hide_index=True)
                 
-                # Tableau interactif des alertes avec style
-                st.dataframe(
-                    df_alerts[['Intervenant', 'Heures hebdo contrat', 'Heures totales', 'Diagnostic']].sort_values(by='Diagnostic'),
-                    use_container_width=True,
-                    hide_index=True
-                )
-                
-                # Graphique interactif Altair pour les alertes
-                st.markdown("#### 📊 Visualisation des dépassements")
+                # Graphique Interactif
                 chart = alt.Chart(df_alerts).mark_bar().encode(
-                    x=alt.X('Intervenant:N', sort='-y', title="Intervenant"),
+                    x=alt.X('Intervenant:N', sort='-y'),
                     y=alt.Y('Total_Dec:Q', title="Heures Réalisées"),
-                    color=alt.Color('Diagnostic:N', scale=alt.Scale(domain=["⚠️ Seuil 34h dépassé", "🔴 Dépassement 1/3 Contrat", "🚫 Dépassement 40h (Temps Plein)"], range=['#fbbf24', '#ef4444', '#7f1d1d'])),
-                    tooltip=['Intervenant', 'Heures hebdo contrat', 'Heures totales', 'Diagnostic']
+                    color=alt.Color('Diagnostic:N', scale=alt.Scale(domain=["🚫 Dépassement Seuil 34h", "🔴 > 1/3 Temps Partiel", "🚫 Dépassement 40h (Temps Plein)"], range=['#fbbf24', '#ef4444', '#7f1d1d'])),
+                    tooltip=['Intervenant', 'Heures totales', 'Diagnostic']
                 ).properties(height=400)
-                
-                # Ligne de seuil 34h
-                rule = alt.Chart(pd.DataFrame({'y': [34]})).mark_rule(color='orange', strokeDash=[5,5]).encode(y='y:Q')
-                
-                st.altair_chart(chart + rule, use_container_width=True)
+                st.altair_chart(chart, use_container_width=True)
             else:
-                st.success("Félicitations ! Le secteur est 100% conforme cette semaine.")
+                st.success("Toutes les tournées de ce secteur sont conformes aux règles 34h/40h et 1/3 contrat.")
 
 st.sidebar.divider()
-st.sidebar.caption("Aymen Amor | Expertise Data & Process | emlyon")
+st.sidebar.caption("Aymen Amor | Expert Data & Process")
