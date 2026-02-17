@@ -35,7 +35,7 @@ st.markdown("""
 # --- FONCTIONS DE CONVERSION ---
 
 def to_hhmm(decimal_hours):
-    """Transforme 151.67 en 151:40"""
+    """Transforme 151.67 en 151:40 pour les Metrics"""
     try:
         val = float(str(decimal_hours).replace(',', '.'))
         abs_val = abs(val)
@@ -50,18 +50,22 @@ def to_hhmm(decimal_hours):
         return "00:00"
 
 def robust_read_csv(file):
-    """Lecture robuste des exports Ximi"""
+    """Lecture intelligente des exports Ximi"""
     try:
-        return pd.read_csv(file, sep=';', encoding='latin-1')
+        df = pd.read_csv(file, sep=';', encoding='latin-1')
+        
+        # Liste des colonnes qui sont du texte et ne doivent PAS être converties en chiffres
+        cols_texte = ['Intervenant', 'Secteur intervenant', 'Entité', 'Type', 'Contrat', 'Bulletin de paie']
+        
+        for col in df.columns:
+            if col not in cols_texte and df[col].dtype == 'object':
+                # On ne convertit que si la colonne contient des virgules ET ressemble à des chiffres
+                if df[col].str.contains(r'^-?\d+,\d+$', na=False).any():
+                    df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='coerce')
+        return df
     except:
         file.seek(0)
         return pd.read_csv(file, sep=';', encoding='utf-8')
-
-def clean_numeric(df, col):
-    """Nettoie les colonnes avec des virgules"""
-    if col in df.columns:
-        return pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
-    return pd.Series([0] * len(df))
 
 # --- INITIALISATION MÉMOIRE ---
 if 'df_mensuel' not in st.session_state:
@@ -95,27 +99,26 @@ else:
     # --- ONGLET MENSUEL ---
     with tab_m:
         if st.session_state.df_mensuel is not None:
-            df = st.session_state.df_mensuel
+            df = st.session_state.df_mensuel.copy()
             
-            # Filtre Secteur (Dropdown classique)
+            # Filtre Secteur
             col_sec = 'Secteur intervenant' if 'Secteur intervenant' in df.columns else df.columns[1]
             list_secteurs = ["Tous"] + sorted([str(s) for s in df[col_sec].unique() if pd.notna(s)])
-            sel_sec = st.selectbox("Secteur principal", list_secteurs, key="m_sec")
+            sel_sec = st.selectbox("Filtrer par Secteur", list_secteurs, key="m_sec")
             
             df_temp = df if sel_sec == "Tous" else df[df[col_sec].astype(str) == sel_sec]
 
-            # --- AJOUT DU FILTRE TYPE EXCEL (RECHERCHE) ---
-            search = st.text_input("🔍 Rechercher un intervenant ou une valeur (Filtre Excel) :", key="search_m")
+            # Recherche Type Excel
+            search = st.text_input("🔍 Rechercher un nom ou une valeur (Filtre Excel) :", key="search_m")
             if search:
-                # On filtre sur toutes les colonnes pour simuler la recherche Excel
                 df_filt = df_temp[df_temp.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
             else:
                 df_filt = df_temp
 
             # Metrics
-            h_base_val = clean_numeric(df_filt, 'Hres de base').sum()
-            h_trav_val = clean_numeric(df_filt, 'Total heures travail effectif').sum()
-            dev_val = clean_numeric(df_filt, 'Déviation').sum()
+            h_base_val = df_filt['Hres de base'].sum() if 'Hres de base' in df_filt.columns else 0
+            h_trav_val = df_filt['Total heures travail effectif'].sum() if 'Total heures travail effectif' in df_filt.columns else 0
+            dev_val = df_filt['Déviation'].sum() if 'Déviation' in df_filt.columns else 0
 
             c1, c2, c3 = st.columns(3)
             with c1: st.metric("Hres de base total", to_hhmm(h_base_val))
@@ -124,14 +127,22 @@ else:
 
             st.divider()
             
-            # Édition avec Tri (Cliquer sur les en-têtes)
+            # --- TABLEAU RÉPARÉ (TRI ALPHA + NUM) ---
             st.subheader("📝 Analyse & Édition")
+            st.caption("👉 Cliquez sur l'en-tête 'Intervenant' pour trier de A à Z. Cliquez sur 'Déviation' pour trier les chiffres.")
+            
             edited = st.data_editor(
                 df_filt, 
                 use_container_width=True, 
                 num_rows="dynamic", 
                 key="ed_m",
-                hide_index=True
+                hide_index=True,
+                column_config={
+                    "Intervenant": st.column_config.TextColumn("Intervenant"),
+                    "Hres de base": st.column_config.NumberColumn(format="%.2f"),
+                    "Total heures travail effectif": st.column_config.NumberColumn(format="%.2f"),
+                    "Déviation": st.column_config.NumberColumn(format="%.2f")
+                }
             )
             
             if st.button("💾 Enregistrer les modifications"):
@@ -145,9 +156,8 @@ else:
     # --- ONGLET HEBDO ---
     with tab_h:
         if st.session_state.df_hebdo is not None:
-            df_h = st.session_state.df_hebdo
+            df_h = st.session_state.df_hebdo.copy()
             
-            # Recherche Hebdo
             search_h = st.text_input("🔍 Rechercher dans l'hebdo :", key="search_h")
             df_h_filt = df_h[df_h.astype(str).apply(lambda x: x.str.contains(search_h, case=False)).any(axis=1)] if search_h else df_h
 
