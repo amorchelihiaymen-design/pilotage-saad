@@ -37,32 +37,20 @@ def to_hhmm(decimal_hours):
         return "00:00"
 
 def robust_read_csv(file):
-    """Lecture et forçage des types pour le tri"""
+    """Lecture et nettoyage des exports Ximi"""
     try:
         df = pd.read_csv(file, sep=';', encoding='latin-1')
-        
-        # Liste des colonnes de chiffres dans ton fichier Ximi
         cols_numeriques = [
             'Hres de base', 'Hres trajet', 'Hres inactivité', 
             'Hres evts. interv.', 'Hres CP', 'Total heures travail effectif', 'Déviation'
         ]
-        
         for col in df.columns:
             if col in cols_numeriques:
-                # 1. On nettoie (virgule en point, suppression des espaces)
                 df[col] = df[col].astype(str).str.replace(',', '.').str.strip()
-                # 2. On force le type NOMBRE
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
             else:
-                # 3. On force le type TEXTE pour les noms et secteurs
                 df[col] = df[col].astype(str).str.strip()
-        
-        # On supprime les lignes totalement vides s'il y en a
-        df = df.dropna(subset=['Intervenant'])
-        # On trie par défaut par nom pour que ce soit propre
-        df = df.sort_values(by='Intervenant')
-        
-        return df.reset_index(drop=True)
+        return df
     except Exception as e:
         st.error(f"Erreur de lecture : {e}")
         return None
@@ -92,15 +80,16 @@ if st.sidebar.button("🗑️ Réinitialiser"):
 st.title("🚀 Pilotage & Optimisation IDF")
 
 if st.session_state.df_mensuel is None and st.session_state.df_hebdo is None:
-    st.info("Veuillez charger vos fichiers CSV pour activer les fonctions de tri.")
+    st.info("Veuillez charger vos fichiers CSV pour activer le tableau de bord.")
 else:
     tab_m, tab_h = st.tabs(["📊 Suivi Mensuel", "📅 Suivi Hebdomadaire"])
 
+    # --- ONGLET MENSUEL ---
     with tab_m:
         if st.session_state.df_mensuel is not None:
             df = st.session_state.df_mensuel.copy()
             
-            # Filtre Secteur (Dropdown)
+            # Filtre Secteur
             col_sec = 'Secteur intervenant' if 'Secteur intervenant' in df.columns else df.columns[1]
             list_secteurs = ["Tous"] + sorted([str(s) for s in df[col_sec].unique()])
             sel_sec = st.selectbox("Secteur principal", list_secteurs, key="m_sec")
@@ -126,9 +115,13 @@ else:
 
             st.divider()
             
-            # --- LE TABLEAU (CONFIGURÉ POUR LE TRI) ---
+            # --- TABLEAU MENSUEL AVEC COLONNES MASQUÉES ---
             st.subheader("📝 Analyse & Édition")
-            st.caption("💡 **Cliquer sur un titre de colonne pour trier** (Intervenant par lettre, Déviation par chiffre).")
+            
+            # Liste des colonnes à masquer pour le mensuel
+            hidden_mensuel = ['Entité', 'Type', 'Début période', 'Fin période', 'Hres inactivité', 'Hres CP', 'Bulletin de paie', 'Calcul manuel ?', 'A recalculer', 'Dernier recalcul']
+            # On génère l'ordre d'affichage en excluant les colonnes masquées
+            visible_mensuel = [c for c in df_filt.columns if c not in hidden_mensuel]
             
             edited = st.data_editor(
                 df_filt, 
@@ -136,11 +129,10 @@ else:
                 num_rows="dynamic", 
                 key="ed_m",
                 hide_index=True,
-                # On définit explicitement les colonnes pour forcer le comportement de tri
+                column_order=visible_mensuel, # <--- C'est ici que la magie opère
                 column_config={
                     "Intervenant": st.column_config.TextColumn("Intervenant", width="large"),
-                    "Déviation": st.column_config.NumberColumn("Déviation", format="%.2f"),
-                    "Total heures travail effectif": st.column_config.NumberColumn("Total heures", format="%.2f")
+                    "Déviation": st.column_config.NumberColumn("Déviation", format="%.2f")
                 }
             )
             
@@ -148,18 +140,35 @@ else:
                 st.session_state.df_mensuel.update(edited)
                 st.success("Données enregistrées !")
 
-            # Export
             csv_data = st.session_state.df_mensuel.to_csv(index=False, sep=';', encoding='utf-8-sig').encode('utf-8-sig')
             st.download_button("📥 Télécharger CSV corrigé", data=csv_data, file_name="Modulation_Mensuelle_MAJ.csv")
 
+    # --- ONGLET HEBDO ---
     with tab_h:
         if st.session_state.df_hebdo is not None:
             df_h = st.session_state.df_hebdo.copy()
+            
             st.subheader("📅 Audit Hebdomadaire")
-            edited_h = st.data_editor(df_h, use_container_width=True, num_rows="dynamic", key="ed_h", hide_index=True)
+            
+            # Liste des colonnes à masquer pour l'hebdomadaire
+            hidden_hebdo = ['Contrat', 'Début contrat', 'Année', 'Heures inactivité', 'Heures internes', 'Heures absences', 'Heures absences maintien']
+            visible_hebdo = [c for c in df_h.columns if c not in hidden_hebdo]
+
+            edited_h = st.data_editor(
+                df_h, 
+                use_container_width=True, 
+                num_rows="dynamic", 
+                key="ed_h", 
+                hide_index=True,
+                column_order=visible_hebdo # <--- Masquage hebdo
+            )
+            
             if st.button("💾 Enregistrer Hebdo"):
                 st.session_state.df_hebdo.update(edited_h)
                 st.success("Modifié !")
+
+            csv_h_out = st.session_state.df_hebdo.to_csv(index=False, sep=';', encoding='utf-8-sig').encode('utf-8-sig')
+            st.download_button("📥 Télécharger CSV Hebdo", data=csv_h_out, file_name="Hebdo_MAJ.csv")
 
 st.sidebar.divider()
 st.sidebar.caption("Aymen Amor | Expert Data & Process")
