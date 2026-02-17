@@ -30,9 +30,7 @@ def to_hhmm(decimal_hours):
         abs_val = abs(val)
         hours = int(abs_val)
         minutes = int(round((abs_val - hours) * 60))
-        if minutes == 60:
-            hours += 1
-            minutes = 0
+        if minutes == 60: hours += 1; minutes = 0
         sign = "-" if val < 0 else ""
         return f"{sign}{hours:02d}:{minutes:02d}"
     except:
@@ -41,10 +39,9 @@ def to_hhmm(decimal_hours):
 def robust_read_csv(file):
     """Lecture et forçage des types pour le tri"""
     try:
-        # Lecture initiale
         df = pd.read_csv(file, sep=';', encoding='latin-1')
         
-        # Colonnes à transformer en NOMBRES pour permettre le tri numérique
+        # Liste des colonnes de chiffres dans ton fichier Ximi
         cols_numeriques = [
             'Hres de base', 'Hres trajet', 'Hres inactivité', 
             'Hres evts. interv.', 'Hres CP', 'Total heures travail effectif', 'Déviation'
@@ -52,14 +49,20 @@ def robust_read_csv(file):
         
         for col in df.columns:
             if col in cols_numeriques:
-                # Nettoyage : on enlève les espaces, remplace la virgule, et force le nombre
-                df[col] = df[col].astype(str).str.replace(r'\s+', '', regex=True).str.replace(',', '.')
+                # 1. On nettoie (virgule en point, suppression des espaces)
+                df[col] = df[col].astype(str).str.replace(',', '.').str.strip()
+                # 2. On force le type NOMBRE
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
             else:
-                # Pour les autres (Intervenant, Secteur), on force le texte pur pour le tri alphabétique
-                df[col] = df[col].astype(str).fillna('')
-                
-        return df
+                # 3. On force le type TEXTE pour les noms et secteurs
+                df[col] = df[col].astype(str).str.strip()
+        
+        # On supprime les lignes totalement vides s'il y en a
+        df = df.dropna(subset=['Intervenant'])
+        # On trie par défaut par nom pour que ce soit propre
+        df = df.sort_values(by='Intervenant')
+        
+        return df.reset_index(drop=True)
     except Exception as e:
         st.error(f"Erreur de lecture : {e}")
         return None
@@ -97,9 +100,9 @@ else:
         if st.session_state.df_mensuel is not None:
             df = st.session_state.df_mensuel.copy()
             
-            # Filtre Secteur
+            # Filtre Secteur (Dropdown)
             col_sec = 'Secteur intervenant' if 'Secteur intervenant' in df.columns else df.columns[1]
-            list_secteurs = ["Tous"] + sorted(df[col_sec].unique())
+            list_secteurs = ["Tous"] + sorted([str(s) for s in df[col_sec].unique()])
             sel_sec = st.selectbox("Secteur principal", list_secteurs, key="m_sec")
             
             df_temp = df if sel_sec == "Tous" else df[df[col_sec] == sel_sec]
@@ -111,10 +114,10 @@ else:
             else:
                 df_filt = df_temp
 
-            # Metrics (Calculées sur les vrais nombres)
-            h_base_val = df_filt['Hres de base'].sum() if 'Hres de base' in df_filt.columns else 0
-            h_trav_val = df_filt['Total heures travail effectif'].sum() if 'Total heures travail effectif' in df_filt.columns else 0
-            dev_val = df_filt['Déviation'].sum() if 'Déviation' in df_filt.columns else 0
+            # Metrics
+            h_base_val = df_filt['Hres de base'].sum()
+            h_trav_val = df_filt['Total heures travail effectif'].sum()
+            dev_val = df_filt['Déviation'].sum()
 
             c1, c2, c3 = st.columns(3)
             with c1: st.metric("Hres de base total", to_hhmm(h_base_val))
@@ -123,9 +126,9 @@ else:
 
             st.divider()
             
-            # --- LE TABLEAU (TRI ENFIN FONCTIONNEL) ---
+            # --- LE TABLEAU (CONFIGURÉ POUR LE TRI) ---
             st.subheader("📝 Analyse & Édition")
-            st.caption("✅ **Tri :** Cliquez sur le titre de la colonne. | **Filtre :** Utilisez la barre de recherche ci-dessus.")
+            st.caption("💡 **Cliquer sur un titre de colonne pour trier** (Intervenant par lettre, Déviation par chiffre).")
             
             edited = st.data_editor(
                 df_filt, 
@@ -133,14 +136,15 @@ else:
                 num_rows="dynamic", 
                 key="ed_m",
                 hide_index=True,
+                # On définit explicitement les colonnes pour forcer le comportement de tri
                 column_config={
                     "Intervenant": st.column_config.TextColumn("Intervenant", width="large"),
-                    "Déviation": st.column_config.NumberColumn("Déviation", format="%.2f")
+                    "Déviation": st.column_config.NumberColumn("Déviation", format="%.2f"),
+                    "Total heures travail effectif": st.column_config.NumberColumn("Total heures", format="%.2f")
                 }
             )
             
             if st.button("💾 Enregistrer les modifications"):
-                # On utilise l'index pour être sûr de mettre à jour la bonne ligne
                 st.session_state.df_mensuel.update(edited)
                 st.success("Données enregistrées !")
 
