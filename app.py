@@ -40,9 +40,11 @@ def robust_read_csv(file):
     """Lecture et nettoyage des exports Ximi"""
     try:
         df = pd.read_csv(file, sep=';', encoding='latin-1')
+        # Colonnes numériques potentielles (on nettoie les virgules)
         cols_numeriques = [
             'Hres de base', 'Hres trajet', 'Hres inactivité', 
-            'Hres evts. interv.', 'Hres CP', 'Total heures travail effectif', 'Déviation'
+            'Hres evts. interv.', 'Hres CP', 'Total heures travail effectif', 'Déviation',
+            'Heures hebdo contrat'
         ]
         for col in df.columns:
             if col in cols_numeriques:
@@ -97,39 +99,40 @@ else:
             df_temp = df if sel_sec == "Tous" else df[df[col_sec] == sel_sec]
 
             # Recherche Type Excel
-            search = st.text_input("🔍 Rechercher (Intervenant, Matricule...) :", key="search_m")
+            search = st.text_input("🔍 Rechercher un intervenant :", key="search_m")
             if search:
                 df_filt = df_temp[df_temp.apply(lambda row: row.astype(str).str.contains(search, case=False).any(), axis=1)]
             else:
                 df_filt = df_temp
 
-            # Metrics
-            h_base_val = df_filt['Hres de base'].sum()
-            h_trav_val = df_filt['Total heures travail effectif'].sum()
-            dev_val = df_filt['Déviation'].sum()
+            # CALCUL DES NOUVELLES METRICS (Déviation)
+            if 'Déviation' in df_filt.columns:
+                series_dev = df_filt['Déviation']
+                pos_dev = series_dev[series_dev > 0].sum()
+                neg_dev = series_dev[series_dev < 0].sum()
+                total_dev = series_dev.sum()
+            else:
+                pos_dev, neg_dev, total_dev = 0, 0, 0
 
             c1, c2, c3 = st.columns(3)
-            with c1: st.metric("Hres de base total", to_hhmm(h_base_val))
-            with c2: st.metric("Travail Effectif", to_hhmm(h_trav_val))
-            with c3: st.metric("Modulation (Déviation)", to_hhmm(dev_val))
+            with c1: st.metric("Somme Déviations (+)", to_hhmm(pos_dev))
+            with c2: st.metric("Somme Déviations (-)", to_hhmm(neg_dev))
+            with c3: st.metric("Balance Modulation", to_hhmm(total_dev))
 
             st.divider()
             
-            # --- TABLEAU MENSUEL AVEC COLONNES MASQUÉES ---
-            st.subheader("📝 Analyse & Édition")
-            
-            # Liste des colonnes à masquer pour le mensuel
+            # --- MASQUAGE DES COLONNES MENSUEL ---
             hidden_mensuel = ['Entité', 'Type', 'Début période', 'Fin période', 'Hres inactivité', 'Hres CP', 'Bulletin de paie', 'Calcul manuel ?', 'A recalculer', 'Dernier recalcul']
-            # On génère l'ordre d'affichage en excluant les colonnes masquées
             visible_mensuel = [c for c in df_filt.columns if c not in hidden_mensuel]
             
+            st.subheader("📝 Analyse & Édition")
             edited = st.data_editor(
                 df_filt, 
                 use_container_width=True, 
                 num_rows="dynamic", 
                 key="ed_m",
                 hide_index=True,
-                column_order=visible_mensuel, # <--- C'est ici que la magie opère
+                column_order=visible_mensuel,
                 column_config={
                     "Intervenant": st.column_config.TextColumn("Intervenant", width="large"),
                     "Déviation": st.column_config.NumberColumn("Déviation", format="%.2f")
@@ -147,10 +150,9 @@ else:
     with tab_h:
         if st.session_state.df_hebdo is not None:
             df_h = st.session_state.df_hebdo.copy()
-            
             st.subheader("📅 Audit Hebdomadaire")
             
-            # Liste des colonnes à masquer pour l'hebdomadaire
+            # --- MASQUAGE DES COLONNES HEBDO ---
             hidden_hebdo = ['Contrat', 'Début contrat', 'Année', 'Heures inactivité', 'Heures internes', 'Heures absences', 'Heures absences maintien']
             visible_hebdo = [c for c in df_h.columns if c not in hidden_hebdo]
 
@@ -160,7 +162,7 @@ else:
                 num_rows="dynamic", 
                 key="ed_h", 
                 hide_index=True,
-                column_order=visible_hebdo # <--- Masquage hebdo
+                column_order=visible_hebdo
             )
             
             if st.button("💾 Enregistrer Hebdo"):
