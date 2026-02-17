@@ -2,14 +2,15 @@ import streamlit as st
 import pandas as pd
 import io
 
-# --- CONFIGURATION DE LA PAGE ---
+# --- CONFIGURATION ---
 st.set_page_config(page_title="Pilotage IDF - Secteurs", layout="wide")
 
-# --- STYLE CSS (METRICS & DESIGN) ---
+# --- STYLE CSS (DESIGN BLEU/GRIS) ---
 st.markdown("""
     <style>
     .main { background-color: #f5f7f9; }
     
+    /* Metrics Design */
     [data-testid="stMetric"] {
         background-color: #ffffff;
         padding: 20px;
@@ -28,17 +29,13 @@ st.markdown("""
         color: #1E3A8A !important;
         font-weight: bold !important;
     }
-    
-    /* Style pour rendre le tableau plus grand par défaut */
-    .stDataFrame {
-        width: 100%;
-    }
     </style>
     """, unsafe_allow_html=True)
 
 # --- FONCTIONS DE CONVERSION ---
 
 def to_hhmm(decimal_hours):
+    """Transforme 151.67 en 151:40"""
     try:
         val = float(str(decimal_hours).replace(',', '.'))
         abs_val = abs(val)
@@ -53,6 +50,7 @@ def to_hhmm(decimal_hours):
         return "00:00"
 
 def robust_read_csv(file):
+    """Lecture robuste des exports Ximi"""
     try:
         return pd.read_csv(file, sep=';', encoding='latin-1')
     except:
@@ -60,17 +58,18 @@ def robust_read_csv(file):
         return pd.read_csv(file, sep=';', encoding='utf-8')
 
 def clean_numeric(df, col):
+    """Nettoie les colonnes avec des virgules"""
     if col in df.columns:
         return pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
     return pd.Series([0] * len(df))
 
-# --- INITIALISATION SESSION STATE ---
+# --- INITIALISATION MÉMOIRE ---
 if 'df_mensuel' not in st.session_state:
     st.session_state.df_mensuel = None
 if 'df_hebdo' not in st.session_state:
     st.session_state.df_hebdo = None
 
-# --- SIDEBAR : IMPORTATION ---
+# --- SIDEBAR ---
 st.sidebar.title("📁 Importation Ximi")
 file_m = st.sidebar.file_uploader("1. Export MENSUEL (CSV)", type=['csv'])
 file_h = st.sidebar.file_uploader("2. Export HEBDO (CSV)", type=['csv'])
@@ -80,7 +79,7 @@ if file_m and st.session_state.df_mensuel is None:
 if file_h and st.session_state.df_hebdo is None:
     st.session_state.df_hebdo = robust_read_csv(file_h)
 
-if st.sidebar.button("🗑️ Réinitialiser les données"):
+if st.sidebar.button("🗑️ Réinitialiser"):
     st.session_state.df_mensuel = None
     st.session_state.df_hebdo = None
     st.rerun()
@@ -98,12 +97,20 @@ else:
         if st.session_state.df_mensuel is not None:
             df = st.session_state.df_mensuel
             
-            # Filtre Secteur
+            # Filtre Secteur (Dropdown classique)
             col_sec = 'Secteur intervenant' if 'Secteur intervenant' in df.columns else df.columns[1]
             list_secteurs = ["Tous"] + sorted([str(s) for s in df[col_sec].unique() if pd.notna(s)])
-            sel_sec = st.selectbox("Filtrer par Secteur", list_secteurs, key="m_sec")
+            sel_sec = st.selectbox("Secteur principal", list_secteurs, key="m_sec")
             
-            df_filt = df if sel_sec == "Tous" else df[df[col_sec].astype(str) == sel_sec]
+            df_temp = df if sel_sec == "Tous" else df[df[col_sec].astype(str) == sel_sec]
+
+            # --- AJOUT DU FILTRE TYPE EXCEL (RECHERCHE) ---
+            search = st.text_input("🔍 Rechercher un intervenant ou une valeur (Filtre Excel) :", key="search_m")
+            if search:
+                # On filtre sur toutes les colonnes pour simuler la recherche Excel
+                df_filt = df_temp[df_temp.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
+            else:
+                df_filt = df_temp
 
             # Metrics
             h_base_val = clean_numeric(df_filt, 'Hres de base').sum()
@@ -117,17 +124,14 @@ else:
 
             st.divider()
             
-            # --- AJOUT DE LA RECHERCHE STYLE EXCEL ---
+            # Édition avec Tri (Cliquer sur les en-têtes)
             st.subheader("📝 Analyse & Édition")
-            st.caption("💡 Astuce : Cliquez sur les en-têtes pour trier. Utilisez la loupe en haut à droite du tableau pour filtrer.")
-            
-            # Utilisation de st.data_editor avec tri activé
             edited = st.data_editor(
                 df_filt, 
                 use_container_width=True, 
                 num_rows="dynamic", 
                 key="ed_m",
-                hide_index=True # Pour un look plus Excel/Tableau pro
+                hide_index=True
             )
             
             if st.button("💾 Enregistrer les modifications"):
@@ -135,29 +139,20 @@ else:
                 st.success("Données enregistrées !")
 
             # Export
-            csv_out = st.session_state.df_mensuel.to_csv(index=False, sep=';', encoding='utf-8-sig').encode('utf-8-sig')
-            st.download_button("📥 Télécharger CSV", data=csv_out, file_name="Modulation_Mensuelle_MAJ.csv")
-            
-            # Graphique
-            st.divider()
-            st.subheader("📈 Graphique de Modulation")
-            df_chart = df_filt.copy()
-            df_chart['Modul_Num'] = clean_numeric(df_chart, 'Déviation')
-            st.bar_chart(df_chart, x='Intervenant', y='Modul_Num')
+            csv_data = st.session_state.df_mensuel.to_csv(index=False, sep=';', encoding='utf-8-sig').encode('utf-8-sig')
+            st.download_button("📥 Télécharger CSV corrigé", data=csv_data, file_name="Modulation_Mensuelle_MAJ.csv")
 
     # --- ONGLET HEBDO ---
     with tab_h:
         if st.session_state.df_hebdo is not None:
             df_h = st.session_state.df_hebdo
-            st.subheader("📅 Audit Hebdomadaire")
             
-            edited_h = st.data_editor(
-                df_h, 
-                use_container_width=True, 
-                num_rows="dynamic", 
-                key="ed_h",
-                hide_index=True
-            )
+            # Recherche Hebdo
+            search_h = st.text_input("🔍 Rechercher dans l'hebdo :", key="search_h")
+            df_h_filt = df_h[df_h.astype(str).apply(lambda x: x.str.contains(search_h, case=False)).any(axis=1)] if search_h else df_h
+
+            st.subheader("📅 Audit Hebdomadaire")
+            edited_h = st.data_editor(df_h_filt, use_container_width=True, num_rows="dynamic", key="ed_h", hide_index=True)
             
             if st.button("💾 Enregistrer Hebdo"):
                 st.session_state.df_hebdo.update(edited_h)
