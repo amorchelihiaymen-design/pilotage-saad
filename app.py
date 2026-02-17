@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import altair as alt
 import io
 
 # --- CONFIGURATION ---
@@ -25,7 +24,7 @@ st.markdown("""
 # --- FONCTIONS DE CONVERSION ---
 
 def to_hhmm(decimal_hours):
-    """Convertit 151.67 en '151:40'"""
+    """Affiche 151.67 sous la forme '151:40' pour les Metrics"""
     try:
         val = float(decimal_hours)
         abs_val = abs(val)
@@ -105,7 +104,7 @@ else:
             else:
                 df_filt = df_temp
 
-            # CALCUL DES WIDGETS (Déviations +/-)
+            # CALCUL DES METRICS
             if 'Déviation' in df_filt.columns:
                 series_dev = df_filt['Déviation']
                 pos_dev = series_dev[series_dev > 0].sum()
@@ -115,13 +114,13 @@ else:
                 pos_dev, neg_dev, total_dev = 0, 0, 0
 
             c1, c2, c3 = st.columns(3)
-            with c1: st.metric("Déviations (+) (A payer)", to_hhmm(pos_dev))
-            with c2: st.metric("Déviations (-) (A rattraper)", to_hhmm(neg_dev))
-            with c3: st.metric("Balance Globale", to_hhmm(total_dev))
+            with c1: st.metric("Somme Déviations (+)", to_hhmm(pos_dev))
+            with c2: st.metric("Somme Déviations (-)", to_hhmm(neg_dev))
+            with c3: st.metric("Balance Modulation", to_hhmm(total_dev))
 
             st.divider()
             
-            # --- ANALYSE & ÉDITION (Colonnes Masquées) ---
+            # --- ANALYSE & ÉDITION ---
             st.subheader("📝 Analyse & Édition")
             hidden_mensuel = ['Entité', 'Type', 'Début période', 'Fin période', 'Hres inactivité', 'Hres CP', 'Bulletin de paie', 'Calcul manuel ?', 'A recalculer', 'Dernier recalcul']
             visible_mensuel = [c for c in df_filt.columns if c not in hidden_mensuel]
@@ -146,38 +145,27 @@ else:
                     st.success("Enregistré !")
             with col_btn2:
                 csv_data = st.session_state.df_mensuel.to_csv(index=False, sep=';', encoding='utf-8-sig').encode('utf-8-sig')
-                st.download_button("📥 Télécharger CSV", data=csv_data, file_name="Modulation_Mensuelle_MAJ.csv")
+                st.download_button("📥 Télécharger CSV corrigé", data=csv_data, file_name="Modulation_Mensuelle_MAJ.csv")
 
-            # --- GRAPHIQUE AVEC VALEURS APPARENTES ---
+            # --- GRAPHIQUE DE PILOTAGE ---
             st.divider()
-            st.subheader("📈 Vue d'ensemble (Valeurs apparentes)")
+            st.subheader("📈 Vue d'ensemble de la Modulation")
             
             if not df_filt.empty and 'Déviation' in df_filt.columns:
+                # Préparation des données pour le graphique : on trie par déviation pour la clarté
                 df_chart = df_filt[['Intervenant', 'Déviation']].copy()
                 df_chart = df_chart.sort_values(by='Déviation', ascending=False)
                 
-                # Création du graphique avec Altair
-                base = alt.Chart(df_chart).encode(
-                    x=alt.X('Intervenant:N', sort='-y', title="Intervenant"),
-                    y=alt.Y('Déviation:Q', title="Déviation (heures)")
+                # Affichage du graphique à barres
+                st.bar_chart(
+                    data=df_chart, 
+                    x='Intervenant', 
+                    y='Déviation', 
+                    use_container_width=True
                 )
-
-                bars = base.mark_bar(color='#1E3A8A')
-
-                # Ajout des labels (valeurs apparentes)
-                text = base.mark_text(
-                    align='center',
-                    baseline='bottom',
-                    dy=alt.condition(alt.datum.Déviation >= 0, alt.value(-5), alt.value(15)),
-                    color='#4A4A4A',
-                    fontWeight='bold'
-                ).encode(
-                    text=alt.Text('Déviation:Q', format='.2f')
-                )
-
-                st.altair_chart((bars + text), use_container_width=True)
+                st.caption("💡 Les barres positives représentent les heures à régulariser, les barres négatives la sous-activité.")
             else:
-                st.info("Chargez des données pour afficher le graphique.")
+                st.info("Aucune donnée disponible pour générer le graphique.")
 
     # --- ONGLET HEBDO ---
     with tab_h:
