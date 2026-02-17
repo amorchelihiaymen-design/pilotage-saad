@@ -82,7 +82,6 @@ if st.session_state.df_m is None and st.session_state.df_h is None:
     st.info("Veuillez charger vos exports pour démarrer l'audit par secteur.")
 else:
     # --- LOGIQUE DE MAPPING DES SECTEURS ---
-    # On crée un dictionnaire {Nom Intervenant: Secteur} à partir du mensuel
     mapping_secteurs = {}
     if st.session_state.df_m is not None:
         df_src = st.session_state.df_m
@@ -109,18 +108,24 @@ else:
             with c3: st.metric("Balance", to_hhmm(df_filt_m['Déviation'].sum()))
 
             st.divider()
+            st.subheader("📝 Analyse & Édition")
             hidden_m = ['Entité', 'Type', 'Début période', 'Fin période', 'Hres inactivité', 'Hres CP', 'Bulletin de paie', 'Calcul manuel ?', 'A recalculer', 'Dernier recalcul']
             st.data_editor(df_filt_m, use_container_width=True, hide_index=True, column_order=[c for c in df_filt_m.columns if c not in hidden_m])
+
+            # --- AJOUT DU GRAPHIQUE DANS LE MENSUEL ---
+            st.divider()
+            st.subheader("📈 Courbe de Modulation par Intervenant")
+            if not df_filt_m.empty and 'Déviation' in df_filt_m.columns:
+                # Tri automatique pour un graphique plus lisible
+                df_chart_m = df_filt_m.sort_values(by='Déviation', ascending=False)
+                st.bar_chart(df_chart_m, x='Intervenant', y='Déviation')
 
     # --- ONGLET HEBDO ---
     with tab_h:
         if st.session_state.df_h is not None:
             df_h = st.session_state.df_h.copy()
-            
-            # Application du Secteur dans l'Hebdo via le mapping
             df_h['Secteur'] = df_h['Intervenant'].map(mapping_secteurs).fillna("Non répertorié")
             
-            # Filtre par Secteur (Synchronisé ou indépendant)
             list_sec_h = ["Tous"] + sorted([str(s) for s in df_h['Secteur'].unique()])
             sel_sec_h = st.selectbox("Filtrer l'Hebdo par Secteur", list_sec_h, key="h_sec")
             df_filt_h = df_h if sel_sec_h == "Tous" else df_h[df_h['Secteur'] == sel_sec_h]
@@ -129,7 +134,7 @@ else:
             hidden_h = ['Contrat', 'Début contrat', 'Année', 'Heures inactivité', 'Heures internes', 'Heures absences', 'Heures absences maintien']
             st.data_editor(df_filt_h, use_container_width=True, hide_index=True, column_order=[c for c in df_filt_h.columns if c not in hidden_h])
 
-            # --- ANALYSE DE CONFORMITÉ (34H/40H/TIERS) ---
+            # --- ANALYSE DE CONFORMITÉ ---
             st.divider()
             st.markdown("### 🔔 Alertes de Conformité")
             
@@ -148,7 +153,6 @@ else:
             df_filt_h['Diagnostic'] = df_filt_h.apply(analyze_risk, axis=1)
             df_alerts = df_filt_h[df_filt_h['Diagnostic'] != "✅ Conforme"].copy()
 
-            # Affichage des KPIs d'alertes
             a1, a2, a3 = st.columns(3)
             with a1: st.metric("Alertes 34h", len(df_filt_h[df_filt_h['Diagnostic'].str.contains("34h")]))
             with a2: st.metric("Alertes 1/3 Contrat", len(df_filt_h[df_filt_h['Diagnostic'].str.contains("1/3")]))
@@ -157,7 +161,6 @@ else:
             if not df_alerts.empty:
                 st.dataframe(df_alerts[['Intervenant', 'Heures hebdo contrat', 'Heures totales', 'Diagnostic']], use_container_width=True, hide_index=True)
                 
-                # Graphique Interactif
                 chart = alt.Chart(df_alerts).mark_bar().encode(
                     x=alt.X('Intervenant:N', sort='-y'),
                     y=alt.Y('Total_Dec:Q', title="Heures Réalisées"),
@@ -166,7 +169,7 @@ else:
                 ).properties(height=400)
                 st.altair_chart(chart, use_container_width=True)
             else:
-                st.success("Toutes les tournées de ce secteur sont conformes aux règles 34h/40h et 1/3 contrat.")
+                st.success("Toutes les tournées de ce secteur sont conformes.")
 
 st.sidebar.divider()
 st.sidebar.caption("Aymen Amor | Expert Data & Process")
