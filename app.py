@@ -158,13 +158,19 @@ if st.session_state.df_m is not None:
                 t_contrat = row['Contract_Val']
                 
                 if t_contrat < 35:
-                    # Règles pour les TEMPS PARTIELS
-                    if t_realise > 34: return "🚫 Seuil 34h dépassé"
-                    if (t_realise - t_contrat) > (t_contrat / 3): return "🔴 Dépassement 1/3 Contrat"
+                    # --- RÈGLES TEMPS PARTIEL ---
+                    if t_realise < (t_contrat * 2 / 3): 
+                        return "⚠️ Sous-activité (< 2/3 contrat)"
+                    if t_realise > 34: 
+                        return "🚫 Seuil 34h dépassé"
+                    if (t_realise - t_contrat) > (t_contrat / 3): 
+                        return "🔴 Dépassement 1/3 Contrat"
                 else:
-                    # Règles pour les TEMPS PLEINS (35h et +)
-                    if t_realise < 24: return "⚠️ Temps inférieur à 24h"
-                    if t_realise > 40: return "🚫 Dépassement 40h (Temps Plein)"
+                    # --- RÈGLES TEMPS PLEIN (35h et +) ---
+                    if t_realise < 24: 
+                        return "⚠️ Temps inférieur à 24h"
+                    if t_realise > 40: 
+                        return "🚫 Dépassement 40h (Temps Plein)"
                     
                 return "✅ Conforme"
             
@@ -173,31 +179,33 @@ if st.session_state.df_m is not None:
             st.divider()
             st.markdown("### 🔔 Analyse de Conformité")
             
-            # Affichage des 4 compteurs
-            a1, a2, a3, a4 = st.columns(4)
-            a1.metric("Alertes < 24h (TP)", len(edited_h[edited_h['Diagnostic'].str.contains("24h")]))
-            a2.metric("Alertes 34h", len(edited_h[edited_h['Diagnostic'].str.contains("34h")]))
-            a3.metric("Alertes 1/3 Contrat", len(edited_h[edited_h['Diagnostic'].str.contains("1/3")]))
-            a4.metric("Alertes > 40h", len(edited_h[edited_h['Diagnostic'].str.contains("40h")]))
+            # Affichage de 5 colonnes pour couvrir tous les cas de figures
+            a1, a2, a3, a4, a5 = st.columns(5)
+            a1.metric("Sous-activité (2/3)", len(edited_h[edited_h['Diagnostic'].str.contains("2/3")]))
+            a2.metric("< 24h (TP)", len(edited_h[edited_h['Diagnostic'].str.contains("24h")]))
+            a3.metric("Seuil 34h", len(edited_h[edited_h['Diagnostic'].str.contains("34h")]))
+            a4.metric("Dépas. 1/3", len(edited_h[edited_h['Diagnostic'].str.contains("1/3")]))
+            a5.metric("> 40h (TP)", len(edited_h[edited_h['Diagnostic'].str.contains("40h")]))
 
             df_alerts = edited_h[edited_h['Diagnostic'] != "✅ Conforme"].copy()
             if not df_alerts.empty:
                 st.dataframe(df_alerts[['Intervenant', 'Heures hebdo contrat', 'Heures totales', 'Diagnostic']], use_container_width=True, hide_index=True)
                 
-                # Graphique des alertes
+                # Graphique Altair avec la nouvelle catégorie
                 chart_h = alt.Chart(df_alerts).mark_bar().encode(
-                    x=alt.X('Intervenant:N', sort='-y'),
+                    x=alt.X('Intervenant:N', sort='-y', title="Intervenant"),
                     y=alt.Y('Total_Dec:Q', title="Heures Réalisées"),
                     color=alt.Color('Diagnostic:N', scale=alt.Scale(
                         domain=[
+                            "⚠️ Sous-activité (< 2/3 contrat)",
                             "⚠️ Temps inférieur à 24h", 
                             "🚫 Seuil 34h dépassé", 
                             "🔴 Dépassement 1/3 Contrat", 
                             "🚫 Dépassement 40h (Temps Plein)"
                         ], 
-                        range=['#3b82f6', '#fbbf24', '#ef4444', '#7f1d1d']
+                        range=['#60a5fa', '#3b82f6', '#fbbf24', '#ef4444', '#7f1d1d']
                     )),
-                    tooltip=['Intervenant', 'Heures totales', 'Diagnostic']
+                    tooltip=['Intervenant', 'Heures hebdo contrat', 'Heures totales', 'Diagnostic']
                 ).properties(height=400)
                 
                 st.altair_chart(chart_h, use_container_width=True)
