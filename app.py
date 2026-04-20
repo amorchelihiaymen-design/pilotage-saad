@@ -156,6 +156,11 @@ if st.session_state.df_m is not None:
             def check_risk(row):
                 t_realise = row['Total_Dec']
                 t_contrat = row['Contract_Val']
+                
+                # Nouvelle règle : minimum 24h
+                if t_realise < 24:
+                    return "⚠️ Temps inférieur à 24h"
+                    
                 if t_contrat < 35:
                     if t_realise > 34: return "🚫 Seuil 34h dépassé"
                     if (t_realise - t_contrat) > (t_contrat / 3): return "🔴 Dépassement 1/3 Contrat"
@@ -167,21 +172,34 @@ if st.session_state.df_m is not None:
 
             st.divider()
             st.markdown("### 🔔 Analyse de Conformité")
-            a1, a2, a3 = st.columns(3)
-            a1.metric("Alertes 34h", len(edited_h[edited_h['Diagnostic'].str.contains("34h")]))
-            a2.metric("Alertes 1/3 Contrat", len(edited_h[edited_h['Diagnostic'].str.contains("1/3")]))
-            a3.metric("Alertes 40h (TP)", len(edited_h[edited_h['Diagnostic'].str.contains("40h")]))
+            
+            # Passage à 4 colonnes pour inclure la nouvelle métrique
+            a1, a2, a3, a4 = st.columns(4)
+            a1.metric("Alertes < 24h", len(edited_h[edited_h['Diagnostic'].str.contains("24h")]))
+            a2.metric("Alertes 34h", len(edited_h[edited_h['Diagnostic'].str.contains("34h")]))
+            a3.metric("Alertes 1/3 Contrat", len(edited_h[edited_h['Diagnostic'].str.contains("1/3")]))
+            a4.metric("Alertes 40h (TP)", len(edited_h[edited_h['Diagnostic'].str.contains("40h")]))
 
             df_alerts = edited_h[edited_h['Diagnostic'] != "✅ Conforme"].copy()
             if not df_alerts.empty:
                 st.dataframe(df_alerts[['Intervenant', 'Heures hebdo contrat', 'Heures totales', 'Diagnostic']], use_container_width=True, hide_index=True)
                 
+                # Mise à jour des couleurs et catégories Altair
                 chart_h = alt.Chart(df_alerts).mark_bar().encode(
                     x=alt.X('Intervenant:N', sort='-y'),
                     y=alt.Y('Total_Dec:Q', title="Heures Réalisées"),
-                    color=alt.Color('Diagnostic:N', scale=alt.Scale(domain=["🚫 Seuil 34h dépassé", "🔴 Dépassement 1/3 Contrat", "🚫 Dépassement 40h (Temps Plein)"], range=['#fbbf24', '#ef4444', '#7f1d1d'])),
+                    color=alt.Color('Diagnostic:N', scale=alt.Scale(
+                        domain=[
+                            "⚠️ Temps inférieur à 24h", 
+                            "🚫 Seuil 34h dépassé", 
+                            "🔴 Dépassement 1/3 Contrat", 
+                            "🚫 Dépassement 40h (Temps Plein)"
+                        ], 
+                        range=['#3b82f6', '#fbbf24', '#ef4444', '#7f1d1d']  # #3b82f6 correspond à un bleu visible
+                    )),
                     tooltip=['Intervenant', 'Heures totales', 'Diagnostic']
                 ).properties(height=400)
+                
                 st.altair_chart(chart_h, use_container_width=True)
             else:
                 st.success("✅ Conformité totale sur ce secteur.")
