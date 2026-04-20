@@ -136,7 +136,7 @@ if st.session_state.df_m is not None:
         chart_data['Déviation'] = force_numeric(chart_data, 'Déviation')
         st.bar_chart(chart_data.sort_values(by='Déviation', ascending=False), x='Intervenant', y='Déviation')
 
-    # --- ONGLET HEBDO ---
+# --- ONGLET HEBDO ---
     with tab_h:
         if st.session_state.df_h is not None:
             df_h_calc = st.session_state.df_h.copy()
@@ -157,15 +157,15 @@ if st.session_state.df_m is not None:
                 t_realise = row['Total_Dec']
                 t_contrat = row['Contract_Val']
                 
-                # Nouvelle règle : minimum 24h
-                if t_realise < 24:
-                    return "⚠️ Temps inférieur à 24h"
-                    
                 if t_contrat < 35:
+                    # Règles pour les TEMPS PARTIELS
                     if t_realise > 34: return "🚫 Seuil 34h dépassé"
                     if (t_realise - t_contrat) > (t_contrat / 3): return "🔴 Dépassement 1/3 Contrat"
                 else:
+                    # Règles pour les TEMPS PLEINS (35h et +)
+                    if t_realise < 24: return "⚠️ Temps inférieur à 24h"
                     if t_realise > 40: return "🚫 Dépassement 40h (Temps Plein)"
+                    
                 return "✅ Conforme"
             
             edited_h['Diagnostic'] = edited_h.apply(check_risk, axis=1)
@@ -173,18 +173,18 @@ if st.session_state.df_m is not None:
             st.divider()
             st.markdown("### 🔔 Analyse de Conformité")
             
-            # Passage à 4 colonnes pour inclure la nouvelle métrique
+            # Affichage des 4 compteurs
             a1, a2, a3, a4 = st.columns(4)
-            a1.metric("Alertes < 24h", len(edited_h[edited_h['Diagnostic'].str.contains("24h")]))
+            a1.metric("Alertes < 24h (TP)", len(edited_h[edited_h['Diagnostic'].str.contains("24h")]))
             a2.metric("Alertes 34h", len(edited_h[edited_h['Diagnostic'].str.contains("34h")]))
             a3.metric("Alertes 1/3 Contrat", len(edited_h[edited_h['Diagnostic'].str.contains("1/3")]))
-            a4.metric("Alertes 40h (TP)", len(edited_h[edited_h['Diagnostic'].str.contains("40h")]))
+            a4.metric("Alertes > 40h", len(edited_h[edited_h['Diagnostic'].str.contains("40h")]))
 
             df_alerts = edited_h[edited_h['Diagnostic'] != "✅ Conforme"].copy()
             if not df_alerts.empty:
                 st.dataframe(df_alerts[['Intervenant', 'Heures hebdo contrat', 'Heures totales', 'Diagnostic']], use_container_width=True, hide_index=True)
                 
-                # Mise à jour des couleurs et catégories Altair
+                # Graphique des alertes
                 chart_h = alt.Chart(df_alerts).mark_bar().encode(
                     x=alt.X('Intervenant:N', sort='-y'),
                     y=alt.Y('Total_Dec:Q', title="Heures Réalisées"),
@@ -195,7 +195,7 @@ if st.session_state.df_m is not None:
                             "🔴 Dépassement 1/3 Contrat", 
                             "🚫 Dépassement 40h (Temps Plein)"
                         ], 
-                        range=['#3b82f6', '#fbbf24', '#ef4444', '#7f1d1d']  # #3b82f6 correspond à un bleu visible
+                        range=['#3b82f6', '#fbbf24', '#ef4444', '#7f1d1d']
                     )),
                     tooltip=['Intervenant', 'Heures totales', 'Diagnostic']
                 ).properties(height=400)
