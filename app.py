@@ -108,7 +108,7 @@ with st.expander("ℹ️ Comment utiliser cet outil ?", expanded=True):
     Voici comment piloter votre périmètre en 4 étapes :
     
     1. 📁 **Importez vos fichiers :** Utilisez le panneau à gauche pour charger les exports Ximi **Mensuel** et **Hebdo**.
-    2. 🎯 **Sélectionnez votre Cellule :** Une fois les fichiers chargés, choisissez votre équipe dans le menu déroulant.
+    2. 🎯 **Sélectionnez votre Secteur :** Une fois les fichiers chargés, choisissez votre équipe dans le menu déroulant.
     3. 🔍 **Analysez & Simulez :** - L'onglet **Mensuel** montre l'état de la modulation globale.
        - L'onglet **Hebdo** détecte les anomalies (sous-activité, dépassements).
        - **Correction en direct :** Modifiez les valeurs dans les tableaux pour simuler des régularisations.
@@ -121,17 +121,17 @@ with st.expander("ℹ️ Comment utiliser cet outil ?", expanded=True):
 if st.session_state.df_m is not None:
     df_m_full = st.session_state.df_m
     col_sec_src = 'Secteur intervenant' if 'Secteur intervenant' in df_m_full.columns else df_m_full.columns[1]
-    mapping_cellules = df_m_full.drop_duplicates('Intervenant').set_index('Intervenant')[col_sec_src].to_dict()
+    mapping_secteurs = df_m_full.drop_duplicates('Intervenant').set_index('Intervenant')[col_sec_src].to_dict()
 
-    # --- SÉLECTEUR DE CELLULE ---
-    cellules = ["Toutes"] + sorted([str(s) for s in df_m_full[col_sec_src].unique() if pd.notna(s)])
-    sel_sec = st.selectbox("🎯 Cellule", cellules, key="audit_sector")
+    # --- SÉLECTEUR DE SECTEUR ---
+    secteurs = ["Tous"] + sorted([str(s) for s in df_m_full[col_sec_src].unique() if pd.notna(s)])
+    sel_sec = st.selectbox("🎯 Secteur", secteurs, key="audit_sector")
 
     tab_m, tab_h = st.tabs(["📊 Pilotage Modulation (Mensuel)", "📅 Suivi de Conformité (Hebdo)"])
 
     # --- ONGLET MENSUEL ---
     with tab_m:
-        df_filt_m = df_m_full if sel_sec == "Toutes" else df_m_full[df_m_full[col_sec_src] == sel_sec]
+        df_filt_m = df_m_full if sel_sec == "Tous" else df_m_full[df_m_full[col_sec_src] == sel_sec]
         metric_container = st.container()
         st.divider()
         st.subheader("📝 Édition des Compteurs Mensuels")
@@ -145,7 +145,7 @@ if st.session_state.df_m is not None:
             c1, c2, c3 = st.columns(3)
             c1.metric("Heures de Base", to_hhmm(h_base.sum()))
             c2.metric("Travail Effectif", to_hhmm(h_trav.sum()))
-            c3.metric("Effectif Cellule", f"{len(edited_m)} sal.")
+            c3.metric("Effectif Secteur", f"{len(edited_m)} sal.")
             c4, c5, c6 = st.columns(3)
             c4.metric("Déviations (+)", to_hhmm(h_dev[h_dev > 0].sum()))
             c5.metric("Déviations (-)", to_hhmm(h_dev[h_dev < 0].sum()))
@@ -164,8 +164,8 @@ if st.session_state.df_m is not None:
     with tab_h:
         if st.session_state.df_h is not None:
             df_h_calc = st.session_state.df_h.copy()
-            df_h_calc['Cellule'] = df_h_calc['Intervenant'].map(mapping_cellules).fillna("Non répertorié")
-            df_filt_h = df_h_calc if sel_sec == "Toutes" else df_h_calc[df_h_calc['Cellule'] == sel_sec]
+            df_h_calc['Secteur'] = df_h_calc['Intervenant'].map(mapping_secteurs).fillna("Non répertorié")
+            df_filt_h = df_h_calc if sel_sec == "Tous" else df_h_calc[df_h_calc['Secteur'] == sel_sec]
             
             st.subheader(f"📅 Suivi Hebdomadaire : {sel_sec}")
             hidden_h = ['Contrat', 'Début contrat', 'Année', 'Heures inactivité', 'Heures internes', 'Heures absences', 'Heures absences maintien']
@@ -191,11 +191,13 @@ if st.session_state.df_m is not None:
             st.divider()
             st.markdown("### 🔔 Contrôle de Modulation")
             a1, a2, a3, a4, a5 = st.columns(5)
-            a1.metric("Sous-activité", len(edited_h[edited_h['Diagnostic'].str.contains("2/3")]))
-            a2.metric("Plancher < 24h", len(edited_h[edited_h['Diagnostic'].str.contains("24h")]))
-            a3.metric("Risque 34h", len(edited_h[edited_h['Diagnostic'].str.contains("34h")]))
-            a4.metric("Dépas. 1/3", len(edited_h[edited_h['Diagnostic'].str.contains("1/3")]))
-            a5.metric("Plafond > 40h", len(edited_h[edited_h['Diagnostic'].str.contains("40h")]))
+            
+            # --- CORRECTION DE L'ERREUR ICI (.astype(str)) ---
+            a1.metric("Sous-activité", len(edited_h[edited_h['Diagnostic'].astype(str).str.contains("2/3")]))
+            a2.metric("Plancher < 24h", len(edited_h[edited_h['Diagnostic'].astype(str).str.contains("24h")]))
+            a3.metric("Risque 34h", len(edited_h[edited_h['Diagnostic'].astype(str).str.contains("34h")]))
+            a4.metric("Dépas. 1/3", len(edited_h[edited_h['Diagnostic'].astype(str).str.contains("1/3")]))
+            a5.metric("Plafond > 40h", len(edited_h[edited_h['Diagnostic'].astype(str).str.contains("40h")]))
 
             df_alerts = edited_h[edited_h['Diagnostic'] != "✅ Conforme"].copy()
             if not df_alerts.empty:
@@ -216,7 +218,7 @@ if st.session_state.df_m is not None:
 else:
     # Message d'accueil quand aucun fichier n'est chargé
     st.info("👈 Pour commencer, veuillez importer vos exports Ximi dans la barre latérale.")
-    
-                
+
+
 st.sidebar.divider()
 st.sidebar.caption("Aymen Amor | Expert Data & Process | emlyon")
