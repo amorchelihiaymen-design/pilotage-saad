@@ -98,7 +98,7 @@ st.sidebar.caption("Aymen Amor | Expert Data & Process | emlyon")
 # =====================================================================
 # EN-TÊTE DE L'APPLICATION (Toujours visible)
 # =====================================================================
-st.title("🚀 Suivi de Modulation & Conformité")
+st.title("Suivi de Modulation & Conformité")
 
 # --- MODE D'EMPLOI (Pour les usagers) ---
 with st.expander("ℹ️ Comment utiliser cet outil ?", expanded=True):
