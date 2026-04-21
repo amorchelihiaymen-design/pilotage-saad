@@ -121,10 +121,23 @@ with st.expander("ℹ️ Comment utiliser cet outil ?", expanded=True):
 if st.session_state.df_m is not None:
     df_m_full = st.session_state.df_m
     col_sec_src = 'Secteur intervenant' if 'Secteur intervenant' in df_m_full.columns else df_m_full.columns[1]
+    
+    # 1. On remplace les vides par "Non répertorié" et on force le type texte (string)
+    df_m_full[col_sec_src] = df_m_full[col_sec_src].fillna("Non répertorié").astype(str)
+    # 2. On supprime le ".0" à la fin si Pandas l'a rajouté (ex: "12.0" devient "12")
+    df_m_full[col_sec_src] = df_m_full[col_sec_src].apply(lambda x: x[:-2] if x.endswith('.0') else x)
+
     mapping_secteurs = df_m_full.drop_duplicates('Intervenant').set_index('Intervenant')[col_sec_src].to_dict()
 
     # --- SÉLECTEUR DE SECTEUR ---
-    secteurs = ["Tous"] + sorted([str(s) for s in df_m_full[col_sec_src].unique() if pd.notna(s)])
+    # On crée la liste des secteurs (sans inclure "Tous" en double)
+    liste_secteurs_uniques = [s for s in df_m_full[col_sec_src].unique() if s != "Non répertorié"]
+    secteurs = ["Tous"] + sorted(liste_secteurs_uniques)
+    
+    # On rajoute "Non répertorié" à la fin de la liste s'il existe
+    if "Non répertorié" in df_m_full[col_sec_src].unique():
+        secteurs.append("Non répertorié")
+
     sel_sec = st.selectbox("🎯 Secteur", secteurs, key="audit_sector")
 
     tab_m, tab_h = st.tabs(["📊 Pilotage Modulation (Mensuel)", "📅 Suivi de Conformité (Hebdo)"])
