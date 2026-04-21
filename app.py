@@ -232,6 +232,3 @@ else:
     # Message d'accueil quand aucun fichier n'est chargé
     st.info("👈 Pour commencer, veuillez importer vos exports Ximi dans la barre latérale.")
 
-
-st.sidebar.divider()
-st.sidebar.caption("Aymen Amor | Expert Data & Process | emlyon")
