@@ -137,6 +137,22 @@ if st.session_state.df_m is not None:
 
     st.title("🚀 Suivi de Modulation & Conformité")
     
+    # --- MODE D'EMPLOI (Pour les usagers) ---
+    with st.expander("ℹ️ Comment utiliser cet outil ?"):
+        st.markdown("""
+        **Bienvenue dans l'outil de Suivi de Modulation & Conformité !**
+        
+        Voici comment vérifier votre périmètre en 4 étapes simples :
+        
+        1. 📁 **Importez vos données :** Dans le panneau latéral gauche, chargez d'abord l'export Ximi **Mensuel**, puis l'export **Hebdo**.
+        2. 🎯 **Sélectionnez votre Cellule :** Utilisez le menu déroulant ci-dessous pour n'afficher que votre équipe.
+        3. 🔍 **Analysez & Simulez :** - Naviguez entre les onglets *Pilotage Modulation* et *Suivi Hebdo*.
+           - **Une erreur de saisie Ximi ?** Corrigez la valeur directement dans le tableau ! Les compteurs et les alertes se mettront à jour instantanément.
+        4. 💾 **Sauvegardez :** Dans l'onglet Mensuel, cliquez sur "Enregistrer..." pour figer vos simulations en mémoire le temps de votre analyse.
+        
+        *💡 Astuce de lecture : Dans l'onglet Hebdo, les alertes bleues (⚠️) signalent une sous-activité, les alertes orange/rouges (🚫/🔴) un dépassement critique.*
+        """)
+        
     # --- SÉLECTEUR DE CELLULE ---
     # Récupération de la liste unique des cellules depuis le fichier
     cellules = ["Toutes"] + sorted([str(s) for s in df_m_full[col_sec_src].unique() if pd.notna(s)])
