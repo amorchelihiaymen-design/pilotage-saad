@@ -1,7 +1,7 @@
 """
 Application Streamlit : Suivi de Modulation & Conformité Opérationnelle
 Objectif : Analyser les exports Ximi pour piloter les heures et garantir la conformité légale.
-Auteur : Aymen Amor | Expert Data & Process | emlyon business school
+Auteur : Aymen AMOR | Référent Métier XIMI | Vyv³
 """
 
 import streamlit as st
@@ -92,7 +92,7 @@ if st.sidebar.button("🗑️ Réinitialiser"):
     st.session_state.df_m = None; st.session_state.df_h = None; st.rerun()
 
 st.sidebar.divider()
-st.sidebar.caption("Aymen Amor | Expert Data & Process | emlyon")
+st.sidebar.caption("Aymen AMOR | Référent Métier XIMI | Vyv³")
 
 
 # =====================================================================
